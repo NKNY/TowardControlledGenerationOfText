@@ -5,6 +5,7 @@
 # TODO Implement word2idx
 # TODO Implement dataset
 # TODO Consider moving embedding of x into an earlier step
+# TODO Confirm whether temperature should change during pretraining
 
 from itertools import chain
 
@@ -141,8 +142,8 @@ class Hu2017(tf.keras.Model):
         kl_loss = self.loss_obj['KL'](mean, logvar)
 
         loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
-        if self.step % 10 == 0:
-            print(f'Step {self.step}.\n\tReconstruction loss: {reconstruction_loss}\n\tKL loss: {kl_loss}')
+        # if self.step % 10 == 0:
+        #     print(f'Step {self.step}.\n\tReconstruction loss: {reconstruction_loss}\n\tKL loss: {kl_loss}')
 
         return loss
 
@@ -214,6 +215,18 @@ class Hu2017(tf.keras.Model):
         loss = loss_s + self.loss_weights['u']*(loss_u + self.loss_weights['beta']*entropy)
 
         return loss
+
+    def print_sampled_sentence(self, content=None, style=None):
+
+        temp = temperature(self.step)
+
+        # x_sampled.shape == (1, max_timesteps, d_emb)
+        x_sampled = self.generator(soft_embeds=False, content=content, style=style, batch_size=1, temp=temp)[0][0]
+        x_sentence = " ".join([self.embedding_layer.idx2word[x.numpy()] for x in x_sampled])
+
+        return x_sentence
+
+
 
 class Encoder(tf.keras.layers.Layer):
 
@@ -461,9 +474,12 @@ if __name__ == "__main__":
         m.optimizer.apply_gradients(zip(gradients, m.get_trainable_variables('discriminator')))
 
 
-    # m.train_step(x, targets, True)
-    # m.train_step(x, targets, False)
-    for i in range(2000):
-        m.train_step(x, targets, True)
+    # for i in range(2000):
+    #     m.train_step(x, targets, pretraining=True)
+    #     if i % 10 == 0:
+    #         print(m.print_sampled_sentence())
+
     # for i in range(100):
-    #     m.train_step(x, targets, False)
+    #     m.train_step(x, targets, pretraining=False)
+    #     if i % 10 == 0:
+    #         print(m.print_sampled_sentence())
