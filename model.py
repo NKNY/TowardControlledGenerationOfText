@@ -2,31 +2,32 @@
 # TODO Docstrings
 # TODO Word embs not trained after pretraining
 # TODO Confirm that gradient tape is located where needed
-# TODO Implement word2idx
-# TODO Implement dataset
 # TODO Consider moving embedding of x into an earlier step
 # TODO Confirm whether temperature should change during pretraining
+# TODO Hidden state depending on content/style?
+# TODO Evaluate the need for pretrained vectors and if deemed essential, implement them
 
 from itertools import chain
 
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+from datasets import SST
 from utils import temperature, KL_Loss, get_sequential_mask, CrossEntropyWithLogitsLoss
 
-START_TOKEN = "start_token"
-EOS_TOKEN = "eos_token"
-UNK_TOKEN = "unk_token"
-PAD_TOKEN = "pad_token"
+START_TOKEN = "SOS"
+EOS_TOKEN = "EOS"
+UNK_TOKEN = "UNK"
+PAD_TOKEN = ""
 
 class Hu2017(tf.keras.Model):
 
-    def __init__(self, d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, num_tokens, word2idx,
+    def __init__(self, d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, num_tokens, token_idx,
                  style_dist_type, style_dist_params, max_timesteps, discriminator_params, optimizer, loss_weights,
                  probs_sum_to_one=True, gradient_norm_clip=5):
         super().__init__()
 
-        self.embedding_layer = EmbeddingLayer(num_tokens, d_emb, word2idx)
+        self.embedding_layer = EmbeddingLayer(num_tokens, d_emb, token_idx)
         self.encoder = Encoder(d_emb, d_content, dropout_rate)
         self.generator = Generator(d_emb, d_content, dropout_rate, num_tokens,
                                    style_dist_type, style_dist_params,
@@ -116,7 +117,7 @@ class Hu2017(tf.keras.Model):
         # targets.shape == (batch_size, max_timesteps)
         targets = tf.concat([
             x[:, 1:],
-            tf.broadcast_to(self.embedding_layer.word2idx[PAD_TOKEN], (batch_size, 1))
+            tf.cast(tf.broadcast_to(self.embedding_layer.token_idx['token2idx'][PAD_TOKEN], (batch_size, 1)), tf.int64)
         ], axis=1)
 
         return targets
@@ -133,7 +134,7 @@ class Hu2017(tf.keras.Model):
     def pretrain_step(self, x):
 
         targets = self.generate_autoencoder_targets(x)  # (batch_size, max_timesteps)
-        mask = get_sequential_mask(x, self.embedding_layer.word2idx[PAD_TOKEN])
+        mask = get_sequential_mask(x, self.embedding_layer.token_idx['token2idx'][PAD_TOKEN])
 
         preds, mean, logvar = self(x, training=True, mask=mask, sample_style_prior=True,
                            sample_content_prior=False)  # (batch_size, max_timesteps, num_tokens)
@@ -150,7 +151,7 @@ class Hu2017(tf.keras.Model):
     def train_encoder(self, x):
 
         targets = self.generate_autoencoder_targets(x)  # (batch_size, max_timesteps)
-        mask = get_sequential_mask(x, self.embedding_layer.word2idx[PAD_TOKEN])
+        mask = get_sequential_mask(x, self.embedding_layer.token_idx['token2idx'][PAD_TOKEN])
 
         # (batch_size, max_timesteps, num_tokens), (batch_size, d_content), (batch_size, d_content)
         preds, mean, logvar = self(x, training=True, mask=mask, sample_style_prior=False, sample_content_prior=False)
@@ -168,7 +169,7 @@ class Hu2017(tf.keras.Model):
         temp = temperature(self.step)
 
         targets = self.generate_autoencoder_targets(x)  # (batch_size, max_timesteps)
-        mask = get_sequential_mask(x, self.embedding_layer.word2idx[PAD_TOKEN])
+        mask = get_sequential_mask(x, self.embedding_layer.token_idx['token2idx'][PAD_TOKEN])
 
         preds, mean, logvar = self(x, training=True, mask=mask, sample_style_prior=False,
                            sample_content_prior=False)  # (batch_size, max_timesteps, num_tokens)
@@ -222,7 +223,7 @@ class Hu2017(tf.keras.Model):
 
         # x_sampled.shape == (1, max_timesteps, d_emb)
         x_sampled = self.generator(soft_embeds=False, content=content, style=style, batch_size=1, temp=temp)[0][0]
-        x_sentence = " ".join([self.embedding_layer.idx2word[x.numpy()] for x in x_sampled])
+        x_sentence = " ".join([self.embedding_layer.token_idx['idx2token'][x.numpy()] for x in x_sampled])
 
         return x_sentence
 
@@ -301,11 +302,10 @@ class Decoder(tf.keras.layers.Layer):
 
 class EmbeddingLayer(tf.keras.layers.Layer):
 
-    def __init__(self, num_tokens, d_emb, word2idx):
+    def __init__(self, num_tokens, d_emb, token_idx):
         super().__init__()
         self.embeddings = tf.keras.layers.Embedding(num_tokens, d_emb)
-        self.word2idx = word2idx
-        self.idx2word = {v:k for k,v in word2idx.items()}
+        self.token_idx = token_idx
 
     def call(self, x):
         return self.embeddings(x)
@@ -352,7 +352,7 @@ class Generator(tf.keras.layers.Layer):
         output = []
 
         # last_word.shape == (batch_size, 1)
-        last_word = tf.broadcast_to(self.embedding_layer.word2idx[START_TOKEN], (batch_size, 1))
+        last_word = tf.broadcast_to(self.embedding_layer.token_idx['token2idx'][START_TOKEN], (batch_size, 1))
         hidden_state = None
 
         for i in range(self.max_timesteps):
@@ -385,7 +385,7 @@ class Generator(tf.keras.layers.Layer):
         output = []
 
         # last_word.shape == (batch_size, 1)
-        last_word = tf.broadcast_to(self.embedding_layer.word2idx[START_TOKEN], (batch_size, 1))
+        last_word = tf.broadcast_to(self.embedding_layer.token_idx['token2idx'][START_TOKEN], (batch_size, 1))
         last_word_emb = self.embedding_layer(last_word)  # (batch_size, 1, d_emb)
 
         hidden_state = None
@@ -435,8 +435,6 @@ class Discriminator(tf.keras.layers.Layer):
 
 if __name__ == "__main__":
 
-    import numpy as np
-
     d_emb = 3
     d_content = 6
     d_style = 2
@@ -444,42 +442,28 @@ if __name__ == "__main__":
     dropout_rate = 0.
     discriminator_dropout_rate = 0.5
     batch_size = 2
-    max_timesteps = 7
-    num_tokens = 5
-    word2idx = {'start_token': 3, 'hello': 1, 'world': 2, 'pad_token': 0, 'eos_token': 4}
+    max_timesteps = 10
+    max_unpadded_timesteps = 7
+    ds = SST(max_timesteps, 100, verbose=True)
+    num_tokens = ds.num_tokens
     style_dist_type = tfp.distributions.Multinomial
     style_dist_params = {'total_count': num_tokens, 'probs': [0.5, 0.5]}
     discriminator_params = {'num_kernels': num_kernels, 'activation': 'relu', 'ngram_sizes': [3, 4, 5]}
     optimizer = tf.keras.optimizers.Adam()
     loss_weights = {'KL': 1, 'style': 1, 'content': 1, 'u': 1, 'beta': 1}
 
-    m = Hu2017(d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, num_tokens, word2idx,
+    m = Hu2017(d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, num_tokens, ds.token_idx,
                      style_dist_type, style_dist_params, max_timesteps, discriminator_params, optimizer,
                      loss_weights)
 
-    x = np.random.randint(0, num_tokens, (batch_size, max_timesteps))
-    targets = np.random.uniform(0, 1, (batch_size, d_style)).astype(dtype=np.float32)
-    mask = x.astype(np.bool).astype(np.float32)
+    train_ds_iter = ds('train', batch_size, max_unpadded_timesteps)
+    for i, (x, targets) in enumerate(train_ds_iter.take(100)):
+        m.train_step(x, targets, pretraining=True)
+        if i % 10 == 0:
+            print(i, m.print_sampled_sentence())
 
-    with tf.GradientTape() as tape:
-        pretrain_loss = m.pretrain_step(x)
-        gradients = tape.gradient(pretrain_loss, m.get_trainable_variables('pretrain'))
-        gradients = [tf.clip_by_norm(g, 5) for g in gradients]
-        m.optimizer.apply_gradients(zip(gradients, m.get_trainable_variables('pretrain')))
-
-    with tf.GradientTape() as tape:
-        discriminator_loss = m.train_discriminator(x, targets)
-        gradients = tape.gradient(discriminator_loss, m.get_trainable_variables('discriminator'))
-        gradients = [tf.clip_by_norm(g, 5) for g in gradients]
-        m.optimizer.apply_gradients(zip(gradients, m.get_trainable_variables('discriminator')))
-
-
-    # for i in range(2000):
-    #     m.train_step(x, targets, pretraining=True)
-    #     if i % 10 == 0:
-    #         print(m.print_sampled_sentence())
-
-    # for i in range(100):
-    #     m.train_step(x, targets, pretraining=False)
-    #     if i % 10 == 0:
-    #         print(m.print_sampled_sentence())
+    test_ds_iter = ds('test', batch_size, max_unpadded_timesteps)
+    for i, (x, targets) in enumerate(test_ds_iter.take(100)):
+        m.train_step(x, targets, pretraining=True)
+        if i % 10 == 0:
+            print(i, m.print_sampled_sentence())
