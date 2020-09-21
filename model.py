@@ -6,6 +6,13 @@
 # TODO Confirm whether temperature should change during pretraining
 # TODO Hidden state depending on content/style?
 # TODO Evaluate the need for pretrained vectors and if deemed essential, implement them
+# TODO Model saving
+# TODO Processing input parameters
+# TODO Losses and summaries
+# TODO Test on small amount of data
+# TODO Pretrain discriminator
+# TODO Tensorboard support
+# TODO Add validation to the training loop
 
 from itertools import chain
 
@@ -22,14 +29,14 @@ PAD_TOKEN = ""
 
 class Hu2017(tf.keras.Model):
 
-    def __init__(self, d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, num_tokens, token_idx,
+    def __init__(self, d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, token_idx,
                  style_dist_type, style_dist_params, max_timesteps, discriminator_params, optimizer, loss_weights,
                  probs_sum_to_one=True, gradient_norm_clip=5):
         super().__init__()
 
-        self.embedding_layer = EmbeddingLayer(num_tokens, d_emb, token_idx)
+        self.embedding_layer = EmbeddingLayer(token_idx, d_emb)
         self.encoder = Encoder(d_emb, d_content, dropout_rate)
-        self.generator = Generator(d_emb, d_content, dropout_rate, num_tokens,
+        self.generator = Generator(d_emb, d_content, dropout_rate,
                                    style_dist_type, style_dist_params,
                                    self.embedding_layer, max_timesteps)
         self.discriminator = Discriminator(d_style, dropout_rate=discriminator_dropout_rate, **discriminator_params)
@@ -38,7 +45,7 @@ class Hu2017(tf.keras.Model):
         self.loss_weights = loss_weights
         self.gradient_norm_clip = gradient_norm_clip
 
-        self.step = 0
+        self.step = tf.Variable(0, name="global_step", dtype=tf.int64)
 
         self.loss_obj = {
             'reconstruction': tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
@@ -84,7 +91,6 @@ class Hu2017(tf.keras.Model):
             # if self.step % 10 == 0:
             #     print(f'Step {self.step}.\n\tPretrain loss: {pretrain_loss}')
         else:
-            self.step = 0
 
             with tf.GradientTape() as tape:
                 discriminator_loss = self.train_discriminator(x, targets)
@@ -105,10 +111,10 @@ class Hu2017(tf.keras.Model):
                 self.optimizer.apply_gradients(zip(gradients, self.get_trainable_variables('encoder')))
 
             if self.step % 10 == 0:
-                print(f'Step {self.step}.\n\tDiscriminator loss: {discriminator_loss}\n\tGenerator loss: {generator_loss}'
+                print(f'Step {self.step.numpy()}.\n\tDiscriminator loss: {discriminator_loss}\n\tGenerator loss: {generator_loss}'
                       f'\n\tEncoder_loss: {encoder_loss}')
 
-        self.step += 1
+            self.step.assign_add(1)
 
     def generate_autoencoder_targets(self, x):
 
@@ -143,8 +149,6 @@ class Hu2017(tf.keras.Model):
         kl_loss = self.loss_obj['KL'](mean, logvar)
 
         loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
-        # if self.step % 10 == 0:
-        #     print(f'Step {self.step}.\n\tReconstruction loss: {reconstruction_loss}\n\tKL loss: {kl_loss}')
 
         return loss
 
@@ -302,9 +306,9 @@ class Decoder(tf.keras.layers.Layer):
 
 class EmbeddingLayer(tf.keras.layers.Layer):
 
-    def __init__(self, num_tokens, d_emb, token_idx):
+    def __init__(self, token_idx, d_emb):
         super().__init__()
-        self.embeddings = tf.keras.layers.Embedding(num_tokens, d_emb)
+        self.embeddings = tf.keras.layers.Embedding(len(token_idx['token2idx']), d_emb)
         self.token_idx = token_idx
 
     def call(self, x):
@@ -312,13 +316,14 @@ class EmbeddingLayer(tf.keras.layers.Layer):
 
 class Generator(tf.keras.layers.Layer):
 
-    def __init__(self, d_emb, d_content, dropout_rate, num_tokens, style_dist_type,
+    def __init__(self, d_emb, d_content, dropout_rate, style_dist_type,
                  style_dist_params, embedding_layer, max_timesteps):
         super().__init__()
 
+        self.num_tokens = len(embedding_layer.token_idx['token2idx'])
         self.d_content = d_content
         self.style_dist = self.init_style_dist(style_dist_type, **style_dist_params)
-        self.decoder = Decoder(d_emb, dropout_rate, num_tokens)
+        self.decoder = Decoder(d_emb, dropout_rate, self.num_tokens)
         self.embedding_layer = embedding_layer
         self.max_timesteps = max_timesteps
 
@@ -435,35 +440,35 @@ class Discriminator(tf.keras.layers.Layer):
 
 if __name__ == "__main__":
 
-    d_emb = 3
+    d_emb = 200
     d_content = 6
     d_style = 2
-    num_kernels = 1
+    num_kernels = 100
     dropout_rate = 0.
     discriminator_dropout_rate = 0.5
-    batch_size = 2
-    max_timesteps = 10
-    max_unpadded_timesteps = 7
+    batch_size = 16
+    max_timesteps = 15
+    max_unpadded_timesteps = 15
     ds = SST(max_timesteps, 100, verbose=True)
     num_tokens = ds.num_tokens
     style_dist_type = tfp.distributions.Multinomial
     style_dist_params = {'total_count': num_tokens, 'probs': [0.5, 0.5]}
     discriminator_params = {'num_kernels': num_kernels, 'activation': 'relu', 'ngram_sizes': [3, 4, 5]}
     optimizer = tf.keras.optimizers.Adam()
-    loss_weights = {'KL': 1, 'style': 1, 'content': 1, 'u': 1, 'beta': 1}
+    loss_weights = {'KL': .1, 'style': .1, 'content': .1, 'u': .1, 'beta': .1}
 
     m = Hu2017(d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, num_tokens, ds.token_idx,
                      style_dist_type, style_dist_params, max_timesteps, discriminator_params, optimizer,
                      loss_weights)
 
-    train_ds_iter = ds('train', batch_size, max_unpadded_timesteps)
-    for i, (x, targets) in enumerate(train_ds_iter.take(100)):
+    train_ds_iter = ds('train', batch_size, max_unpadded_timesteps).take(10).repeat()
+    for i, (x, targets) in enumerate(train_ds_iter.take(1000)):
         m.train_step(x, targets, pretraining=True)
         if i % 10 == 0:
             print(i, m.print_sampled_sentence())
 
-    test_ds_iter = ds('test', batch_size, max_unpadded_timesteps)
-    for i, (x, targets) in enumerate(test_ds_iter.take(100)):
-        m.train_step(x, targets, pretraining=True)
-        if i % 10 == 0:
-            print(i, m.print_sampled_sentence())
+    # test_ds_iter = ds('test', batch_size, max_unpadded_timesteps)
+    # for i, (x, targets) in enumerate(test_ds_iter.take(100)):
+    #     m.train_step(x, targets, pretraining=True)
+    #     if i % 10 == 0:
+    #         print(i, m.print_sampled_sentence())

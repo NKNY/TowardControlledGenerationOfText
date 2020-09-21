@@ -9,9 +9,9 @@ UNK_TOKEN = "UNK"
 PAD_TOKEN = ""
 
 class SST:
-    def __init__(self, padded_sequence_length, shuffle_buffer_size, verbose=True):
+    def __init__(self, max_timesteps, shuffle_buffer_size, verbose=True):
 
-        self.padded_sequence_length = padded_sequence_length
+        self.max_timesteps = max_timesteps
         self.shuffle_buffer_size = shuffle_buffer_size
         self.d_c = 2
 
@@ -38,7 +38,7 @@ class SST:
             .shuffle(self.shuffle_buffer_size) \
             .filter(self.filter_on_len_lambda(max_unpadded_timesteps))\
             .repeat()\
-            .padded_batch(batch_size, padded_shapes=([self.padded_sequence_length], [self.d_c]))
+            .padded_batch(batch_size, padded_shapes=([self.max_timesteps], [self.d_c]))
 
 
     def init_tokenizer(self, corpus, verbose=True):
