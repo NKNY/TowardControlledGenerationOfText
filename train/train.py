@@ -35,14 +35,14 @@ class Hu2017ArgumentParser:
             'num_pretraining_steps': {'default': 10},
             'num_training_steps': {'default': 20},
             'checkpoint_frequency_steps': {'default': 5},
-
+            'log_dir': {'default': '/Users/nknyazev/Documents/CS/projects/text_style_transfer/models/Hu2017'},
         }
         self.param_groups = {
             'model_args': {
                 'init': [
                     'd_emb', 'd_content', 'd_style', 'dropout_rate', 'discriminator_dropout_rate',
                     'style_dist_type', 'style_dist_params', 'max_timesteps', 'discriminator_params', 'optimizer',
-                    'loss_weights'
+                    'loss_weights', 'log_dir'
             ],
         },
             'dataset_args': {
@@ -79,6 +79,7 @@ class TrainingLoop:
         self.model = model
         self.dataset = dataset
         self.model_dir = model_dir
+        self.log_dir = os.path.join(model_dir, 'logs')
         self.checkpoint_prefix = os.path.join(model_dir, 'ckpt')
         self.checkpoint = tf.train.Checkpoint(model=self.model)
         self.checkpoint_manager = tf.train.CheckpointManager(self.checkpoint, model_dir, 3)
@@ -91,7 +92,7 @@ class TrainingLoop:
     def __call__(self, num_pretraining_steps, num_training_steps, batch_size, max_unpadded_timesteps,
                  checkpoint_frequency_steps):
 
-        if self.model.train_step == 0:
+        if self.model.step == 0:
             pretraining_iterator = self.dataset('train', batch_size, max_unpadded_timesteps).take(num_pretraining_steps)
             print(f'Starting pretraining for {num_pretraining_steps} steps.')
             for i, (input, targets) in enumerate(pretraining_iterator):

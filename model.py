@@ -11,7 +11,6 @@
 # TODO Losses and summaries
 # TODO Test on small amount of data
 # TODO Pretrain discriminator
-# TODO Tensorboard support
 # TODO Add validation to the training loop
 
 from itertools import chain
@@ -31,7 +30,7 @@ class Hu2017(tf.keras.Model):
 
     def __init__(self, d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, token_idx,
                  style_dist_type, style_dist_params, max_timesteps, discriminator_params, optimizer, loss_weights,
-                 probs_sum_to_one=True, gradient_norm_clip=5):
+                 probs_sum_to_one=True, gradient_norm_clip=5, log_dir=None, log_frequency=10):
         super().__init__()
 
         self.embedding_layer = EmbeddingLayer(token_idx, d_emb)
@@ -45,6 +44,7 @@ class Hu2017(tf.keras.Model):
         self.loss_weights = loss_weights
         self.gradient_norm_clip = gradient_norm_clip
 
+        self.pretrain_step = tf.Variable(0, name="global_step", dtype=tf.int64)
         self.step = tf.Variable(0, name="global_step", dtype=tf.int64)
 
         self.loss_obj = {
@@ -53,6 +53,12 @@ class Hu2017(tf.keras.Model):
             'content': tf.keras.losses.MeanSquaredError(),
             'style': CrossEntropyWithLogitsLoss(probs_sum_to_one)
         }
+
+        if log_dir is not None:
+            self.writer = tf.summary.create_file_writer(log_dir) if log_dir is not None else None
+            self.writer.set_as_default()
+
+        self.log_frequency = log_frequency
 
     def call(self, x, training, mask, sample_style_prior=False, sample_content_prior=False):
 
@@ -83,11 +89,12 @@ class Hu2017(tf.keras.Model):
 
         if pretraining:
             with tf.GradientTape() as tape:
-                pretrain_loss = self.pretrain_step(x)
+                pretrain_loss = self.train_vae(x)
                 gradients = tape.gradient(pretrain_loss, self.get_trainable_variables('pretrain'))
                 gradients = [tf.clip_by_norm(g, self.gradient_norm_clip) for g in gradients]
                 self.optimizer.apply_gradients(zip(gradients, self.get_trainable_variables('pretrain')))
 
+            self.pretrain_step.assign_add(1)
             # if self.step % 10 == 0:
             #     print(f'Step {self.step}.\n\tPretrain loss: {pretrain_loss}')
         else:
@@ -110,7 +117,7 @@ class Hu2017(tf.keras.Model):
                 gradients = [tf.clip_by_norm(g, self.gradient_norm_clip) for g in gradients]
                 self.optimizer.apply_gradients(zip(gradients, self.get_trainable_variables('encoder')))
 
-            if self.step % 10 == 0:
+            if self.step % self.log_frequency == 0:
                 print(f'Step {self.step.numpy()}.\n\tDiscriminator loss: {discriminator_loss}\n\tGenerator loss: {generator_loss}'
                       f'\n\tEncoder_loss: {encoder_loss}')
 
@@ -137,7 +144,7 @@ class Hu2017(tf.keras.Model):
         }
         return trainable_variable_groups[group_name]
 
-    def pretrain_step(self, x):
+    def train_vae(self, x):
 
         targets = self.generate_autoencoder_targets(x)  # (batch_size, max_timesteps)
         mask = get_sequential_mask(x, self.embedding_layer.token_idx['token2idx'][PAD_TOKEN])
@@ -149,6 +156,11 @@ class Hu2017(tf.keras.Model):
         kl_loss = self.loss_obj['KL'](mean, logvar)
 
         loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
+
+        if self.writer is not None and self.pretrain_step % self.log_frequency == 0:
+            tf.summary.scalar('train_vae_reconstruction_loss', reconstruction_loss, step=self.pretrain_step)
+            tf.summary.scalar('train_vae_kl_loss', kl_loss, step=self.pretrain_step)
+            tf.summary.scalar('train_vae_weighted_loss', loss, step=self.pretrain_step)
 
         return loss
 
@@ -164,6 +176,11 @@ class Hu2017(tf.keras.Model):
         kl_loss = self.loss_obj['KL'](mean, logvar)
 
         loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
+
+        if self.writer is not None and self.step % self.log_frequency == 0:
+            tf.summary.scalar('train_encoder_reconstruction_loss', reconstruction_loss, step=self.step)
+            tf.summary.scalar('train_encoder_kl_loss', kl_loss, step=self.step)
+            tf.summary.scalar('train_encoder_weighted_loss', loss, step=self.step)
 
         return loss
 
@@ -193,8 +210,15 @@ class Hu2017(tf.keras.Model):
 
         loss = (reconstruction_loss
                 + self.loss_weights['KL'] * kl_loss
-                + self.loss_weights['style'] * style_loss
-                + self.loss_weights['content'] * content_loss)
+                + self.loss_weights['content'] * content_loss
+                + self.loss_weights['style'] * style_loss)
+
+        if self.writer is not None and self.step % self.log_frequency == 0:
+            tf.summary.scalar('train_generator_reconstruction_loss', reconstruction_loss, step=self.step)
+            tf.summary.scalar('train_generator_kl_loss', kl_loss, step=self.step)
+            tf.summary.scalar('train_generator_content_loss', content_loss, step=self.step)
+            tf.summary.scalar('train_generator_style_loss', style_loss, step=self.step)
+            tf.summary.scalar('train_generator_weighted_loss', loss, step=self.step)
 
         return loss
 
@@ -218,6 +242,12 @@ class Hu2017(tf.keras.Model):
         loss_u = self.loss_obj['style'](style_sampled, preds_sampled)
 
         loss = loss_s + self.loss_weights['u']*(loss_u + self.loss_weights['beta']*entropy)
+
+        if self.writer is not None:
+            tf.summary.scalar('train_discriminator_entropy_loss', entropy, step=self.step)
+            tf.summary.scalar('train_discriminator_s_loss', loss_s, step=self.step)
+            tf.summary.scalar('train_discriminator_u_loss', loss_u, step=self.step)
+            tf.summary.scalar('train_discriminator_weighted_loss', loss, step=self.step)
 
         return loss
 
