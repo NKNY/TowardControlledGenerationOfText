@@ -12,7 +12,7 @@
 # TODO Test on small amount of data
 # TODO Pretrain discriminator
 # TODO Add validation to the training loop
-
+# TODO Verify that temperature calculation is correct
 from itertools import chain
 
 import tensorflow as tf
