@@ -101,6 +101,9 @@ class TrainingLoop:
                 losses = self.model.train_step(input, targets, pretraining=True)
                 if i % log_frequency_steps == 0:
                     pretraining_iterator.set_description(', '.join(f'{k}: {v}' for k, v in losses.items()))
+                if i % checkpoint_frequency_steps == 0 and i:
+                    print(f'Saving checkpoint for pretraining step {i} (global pretrain step: {self.model.pretrain_step - 1}).')
+                    self.checkpoint_manager.save()
             if num_pretraining_steps > 0:
                 print(f'Pretraining complete. Saving checkpoint to {self.model_dir}.')
                 self.checkpoint_manager.save()
