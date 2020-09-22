@@ -30,7 +30,7 @@ class Hu2017(tf.keras.Model):
 
     def __init__(self, d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, token_idx,
                  style_dist_type, style_dist_params, max_timesteps, discriminator_params, optimizer, loss_weights,
-                 probs_sum_to_one=True, gradient_norm_clip=5, log_dir=None, log_frequency=10):
+                 probs_sum_to_one=True, gradient_norm_clip=5, log_dir=None, log_frequency_steps=10):
         super().__init__()
 
         self.embedding_layer = EmbeddingLayer(token_idx, d_emb)
@@ -58,7 +58,7 @@ class Hu2017(tf.keras.Model):
             self.writer = tf.summary.create_file_writer(log_dir) if log_dir is not None else None
             self.writer.set_as_default()
 
-        self.log_frequency = log_frequency
+        self.log_frequency_steps = log_frequency_steps
 
     def call(self, x, training, mask, sample_style_prior=False, sample_content_prior=False):
 
@@ -95,6 +95,7 @@ class Hu2017(tf.keras.Model):
                 self.optimizer.apply_gradients(zip(gradients, self.get_trainable_variables('pretrain')))
 
             self.pretrain_step.assign_add(1)
+            return {'VAE loss': pretrain_loss}
             # if self.step % 10 == 0:
             #     print(f'Step {self.step}.\n\tPretrain loss: {pretrain_loss}')
         else:
@@ -117,11 +118,18 @@ class Hu2017(tf.keras.Model):
                 gradients = [tf.clip_by_norm(g, self.gradient_norm_clip) for g in gradients]
                 self.optimizer.apply_gradients(zip(gradients, self.get_trainable_variables('encoder')))
 
-            if self.step % self.log_frequency == 0:
-                print(f'Step {self.step.numpy()}.\n\tDiscriminator loss: {discriminator_loss}\n\tGenerator loss: {generator_loss}'
-                      f'\n\tEncoder_loss: {encoder_loss}')
+            # if self.step % self.log_frequency_steps == 0:
+            #     print(f'Step {self.step.numpy()}.\n\tDiscriminator loss: {discriminator_loss}\n\tGenerator loss: {generator_loss}'
+            #           f'\n\tEncoder_loss: {encoder_loss}')
 
             self.step.assign_add(1)
+            return {
+                'Discriminator loss': discriminator_loss,
+                'Generator loss': generator_loss,
+                'Encoder loss': encoder_loss
+            }
+
+
 
     def generate_autoencoder_targets(self, x):
 
@@ -157,7 +165,7 @@ class Hu2017(tf.keras.Model):
 
         loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
 
-        if self.writer is not None and self.pretrain_step % self.log_frequency == 0:
+        if self.writer is not None and self.pretrain_step % self.log_frequency_steps == 0:
             tf.summary.scalar('train_vae_reconstruction_loss', reconstruction_loss, step=self.pretrain_step)
             tf.summary.scalar('train_vae_kl_loss', kl_loss, step=self.pretrain_step)
             tf.summary.scalar('train_vae_weighted_loss', loss, step=self.pretrain_step)
@@ -177,7 +185,7 @@ class Hu2017(tf.keras.Model):
 
         loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
 
-        if self.writer is not None and self.step % self.log_frequency == 0:
+        if self.writer is not None and self.step % self.log_frequency_steps == 0:
             tf.summary.scalar('train_encoder_reconstruction_loss', reconstruction_loss, step=self.step)
             tf.summary.scalar('train_encoder_kl_loss', kl_loss, step=self.step)
             tf.summary.scalar('train_encoder_weighted_loss', loss, step=self.step)
@@ -213,7 +221,7 @@ class Hu2017(tf.keras.Model):
                 + self.loss_weights['content'] * content_loss
                 + self.loss_weights['style'] * style_loss)
 
-        if self.writer is not None and self.step % self.log_frequency == 0:
+        if self.writer is not None and self.step % self.log_frequency_steps == 0:
             tf.summary.scalar('train_generator_reconstruction_loss', reconstruction_loss, step=self.step)
             tf.summary.scalar('train_generator_kl_loss', kl_loss, step=self.step)
             tf.summary.scalar('train_generator_content_loss', content_loss, step=self.step)

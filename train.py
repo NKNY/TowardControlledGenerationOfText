@@ -3,6 +3,7 @@ import os
 from argparse import ArgumentParser
 import tensorflow as tf
 import tensorflow_probability as tfp
+from tqdm import tqdm
 
 from datasets import SST
 from model import Hu2017
@@ -35,6 +36,7 @@ class Hu2017ArgumentParser:
             'num_pretraining_steps': {'default': 10, 'type': int},
             'num_training_steps': {'default': 20, 'type': int},
             'checkpoint_frequency_steps': {'default': 10, 'type': int},
+            'log_frequency_steps': {'default': 10, 'type': int},
             'log_dir': {'default': '/Users/nknyazev/Documents/CS/projects/text_style_transfer/models/Hu2017'},
         }
         self.param_groups = {
@@ -42,7 +44,7 @@ class Hu2017ArgumentParser:
                 'init': [
                     'd_emb', 'd_content', 'd_style', 'dropout_rate', 'discriminator_dropout_rate',
                     'style_dist_type', 'style_dist_params', 'max_timesteps', 'discriminator_params', 'optimizer',
-                    'loss_weights', 'log_dir'
+                    'loss_weights', 'log_dir', 'log_frequency_steps'
             ],
         },
             'dataset_args': {
@@ -56,7 +58,7 @@ class Hu2017ArgumentParser:
                 ],
                 'call': [
                     'num_training_steps', 'num_pretraining_steps', 'batch_size', 'max_unpadded_timesteps',
-                    'checkpoint_frequency_steps'
+                    'checkpoint_frequency_steps', 'log_frequency_steps'
                 ]
             }
         }
@@ -90,23 +92,27 @@ class TrainingLoop:
         self.checkpoint_manager.restore_or_initialize()
 
     def __call__(self, num_pretraining_steps, num_training_steps, batch_size, max_unpadded_timesteps,
-                 checkpoint_frequency_steps):
+                 checkpoint_frequency_steps, log_frequency_steps):
 
         if self.model.step == 0:
-            pretraining_iterator = self.dataset('train', batch_size, max_unpadded_timesteps).take(num_pretraining_steps)
+            pretraining_iterator = tqdm(enumerate(self.dataset('train', batch_size, max_unpadded_timesteps).take(num_pretraining_steps)))
             print(f'Starting pretraining for {num_pretraining_steps} steps.')
-            for i, (input, targets) in enumerate(pretraining_iterator):
-                self.model.train_step(input, targets, pretraining=True)
+            for i, (input, targets) in pretraining_iterator:
+                losses = self.model.train_step(input, targets, pretraining=True)
+                if i % log_frequency_steps == 0:
+                    pretraining_iterator.set_description(', '.join(f'{k}: {v}' for k, v in losses.items()))
             if num_pretraining_steps > 0:
                 print(f'Pretraining complete. Saving checkpoint to {self.model_dir}.')
                 self.checkpoint_manager.save()
         else:
             print('Skipping pretraining.')
 
-        training_iterator = self.dataset('train', batch_size, max_unpadded_timesteps).take(num_training_steps)
+        training_iterator = tqdm(enumerate(self.dataset('train', batch_size, max_unpadded_timesteps).take(num_training_steps)))
         print(f'Starting training for {num_training_steps} steps.')
-        for i, (input, targets) in enumerate(training_iterator):
-            self.model.train_step(input, targets, pretraining=False)
+        for i, (input, targets) in training_iterator:
+            losses = self.model.train_step(input, targets, pretraining=False)
+            if i % log_frequency_steps == 0:
+                training_iterator.set_description(', '.join(f'{k}: {v}' for k, v in losses.items()))
             if i % checkpoint_frequency_steps == 0 and i:
                 print(f'Saving checkpoint for training step {i} (global step: {self.model.step - 1}).')
                 self.checkpoint_manager.save()
