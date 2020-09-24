@@ -98,7 +98,7 @@ class TrainingLoop:
             pretraining_iterator = tqdm(enumerate(self.dataset('train', batch_size, max_unpadded_timesteps).take(num_pretraining_steps)))
             print(f'Starting pretraining for {num_pretraining_steps} steps.')
             for i, (input, targets) in pretraining_iterator:
-                losses = self.model.train_step(input, targets, pretraining=True)
+                losses = self.model.train_vae_step(input)
                 if i % log_frequency_steps == 0:
                     pretraining_iterator.set_description(', '.join(f'{k}: {v}' for k, v in losses.items()))
                 if i % checkpoint_frequency_steps == 0 and i:
@@ -113,7 +113,7 @@ class TrainingLoop:
         training_iterator = tqdm(enumerate(self.dataset('train', batch_size, max_unpadded_timesteps).take(num_training_steps)))
         print(f'Starting training for {num_training_steps} steps.')
         for i, (input, targets) in training_iterator:
-            losses = self.model.train_step(input, targets, pretraining=False)
+            losses = self.model.train_step(input, targets)
             if i % log_frequency_steps == 0:
                 training_iterator.set_description(', '.join(f'{k}: {v}' for k, v in losses.items()))
             if i % checkpoint_frequency_steps == 0 and i:

@@ -10,6 +10,12 @@ def kl_weight(step):
 def temperature(step):
     return 1 - kl_weight(step) + 1e-6
 
+def tf_kl_weight(step):
+    return (tf.math.tanh((step - 3500)/1000) + 1)/2
+
+def tf_temperature(step):
+    return tf.cast(1 - tf_kl_weight(step) + 1e-6, tf.float32)
+
 # TODO Ensure that summing it over the batch has the expected effect
 class KL_Loss(tf.keras.losses.Loss):
 
