@@ -230,7 +230,7 @@ class Hu2017(tf.keras.Model):
     def train_discriminator(self, x, targets):
 
         batch_size = tf.shape(x)[0]
-        temp = tf_temperature(self.step)
+        temp = 1.
 
         x_emb = self.embedding_layer(x)  # (batch_size, max_timesteps, d_emb)
 
