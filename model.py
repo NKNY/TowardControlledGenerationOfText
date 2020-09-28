@@ -259,10 +259,9 @@ class Hu2017(tf.keras.Model):
 
     def print_sampled_sentence(self, content=None, style=None):
 
-        temp = tf_temperature(self.step)
-
         # x_sampled.shape == (1, max_timesteps, d_emb)
-        x_sampled = self.generator.generate_sentences(content=content, style=style, batch_size=1, temp=temp)[0][0]
+        x_sampled = self.generator.generate_sentences(content=content, style=style, batch_size=1, temp=1.,
+                                                      training=False)[0][0]
         x_sentence = " ".join([self.embedding_layer.token_idx['idx2token'][x.numpy()] for x in x_sampled])
 
         return x_sentence
@@ -386,13 +385,12 @@ class Generator(tf.keras.layers.Layer):
         if style is None:
             style = self.sample_style_prior(batch_size)
 
-        output = []
-
         # last_word.shape == (batch_size, 1)
         last_word = tf.broadcast_to(self.embedding_layer.token_idx['token2idx'][START_TOKEN], (batch_size, 1))
+        output = [last_word]
         hidden_state = None
 
-        for i in range(self.max_timesteps):
+        for i in range(self.max_timesteps-1):
             last_word_emb = self.embedding_layer(last_word)  # (batch_size, 1, d_emb)
             # scores.shape == (batch_size, 1, num_tokens)
             # hidden_state[0/1] = (batch_size, d_emb)
@@ -417,14 +415,13 @@ class Generator(tf.keras.layers.Layer):
         if style is None:
             style = self.sample_style_prior(batch_size)  # (batch_size, d_style)
 
-        output = []
-
         # last_word.shape == (batch_size, 1)
         last_word = tf.broadcast_to(self.embedding_layer.token_idx['token2idx'][START_TOKEN], (batch_size, 1))
         last_word_emb = self.embedding_layer(last_word)  # (batch_size, 1, d_emb)
-
+        output = [last_word_emb]
         hidden_state = None
-        for i in range(self.max_timesteps):
+
+        for i in range(self.max_timesteps-1):
             # scores.shape == (batch_size, 1, num_tokens)
             # hidden_state[0/1] = (batch_size, d_emb)
             scores, hidden_state = self.decoder(last_word_emb, content, style, None, training, initial_state=hidden_state)

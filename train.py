@@ -101,6 +101,7 @@ class TrainingLoop:
                 losses = self.model.train_vae_step(input)
                 if i % log_frequency_steps == 0:
                     pretraining_iterator.set_description(', '.join(f'{k}: {v}' for k, v in losses.items()))
+                    print(f'Sampled sentence: {self.model.print_sampled_sentence()}')
                 if i % checkpoint_frequency_steps == 0 and i:
                     print(f'Saving checkpoint for pretraining step {i} (global pretrain step: {self.model.pretrain_step - 1}).')
                     self.checkpoint_manager.save()
@@ -116,6 +117,7 @@ class TrainingLoop:
             losses = self.model.train_step(input, targets)
             if i % log_frequency_steps == 0:
                 training_iterator.set_description(', '.join(f'{k}: {v}' for k, v in losses.items()))
+                print(f'Sampled sentence: {self.model.print_sampled_sentence()}')
             if i % checkpoint_frequency_steps == 0 and i:
                 print(f'Saving checkpoint for training step {i} (global step: {self.model.step - 1}).')
                 self.checkpoint_manager.save()
