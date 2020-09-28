@@ -32,13 +32,17 @@ class SST:
         }
 
     def __call__(self, split, batch_size, max_unpadded_timesteps):
+
+        padded_shapes = ([self.max_timesteps], [self.d_c])
+        padding_values = (tf.cast(self.token_idx['token2idx'][PAD_TOKEN], dtype=tf.int64), None)
+
         return self.dataset[split]\
             .map(self.encode_input_map_fn)\
             .map(self.encode_label)\
             .shuffle(self.shuffle_buffer_size) \
             .filter(self.filter_on_len_lambda(max_unpadded_timesteps))\
             .repeat()\
-            .padded_batch(batch_size, padded_shapes=([self.max_timesteps], [self.d_c]))
+            .padded_batch(batch_size, padded_shapes=padded_shapes, padding_values=padding_values)
 
 
     def init_tokenizer(self, corpus, verbose=True):
