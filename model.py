@@ -1,18 +1,13 @@
 # TODO Confirm dropout is used everywhere where needed
 # TODO Docstrings
-# TODO Word embs not trained after pretraining
+# TODO Confirm word embs not trained after pretraining
 # TODO Confirm that gradient tape is located where needed
-# TODO Consider moving embedding of x into an earlier step
-# TODO Confirm whether temperature should change during pretraining
 # TODO Hidden state depending on content/style?
 # TODO Evaluate the need for pretrained vectors and if deemed essential, implement them
-# TODO Model saving
-# TODO Processing input parameters
-# TODO Losses and summaries
 # TODO Test on small amount of data
 # TODO Pretrain discriminator
 # TODO Add validation to the training loop
-# TODO Verify that temperature calculation is correct
+# TODO Verify that temperature close to 0 doesn't break softmax
 
 from itertools import chain
 
@@ -82,7 +77,7 @@ class Hu2017(tf.keras.Model):
             style = self.discriminator(x_emb, training)
 
         # preds.shape == (batch_size, max_timesteps, num_tokens)
-        preds, _ = self.generator.decoder(x_emb, content, style, mask, training)
+        preds, _ = self.generator.decoder(x_emb, content, style, training=training)
 
         return preds, mean, logvar
 
@@ -93,8 +88,8 @@ class Hu2017(tf.keras.Model):
         gradients = tape.gradient(pretrain_loss, self.get_trainable_variables('pretrain'))
         gradients = [tf.clip_by_norm(g, self.gradient_norm_clip) for g in gradients]
         self.optimizer.apply_gradients(zip(gradients, self.get_trainable_variables('pretrain')))
-
         self.pretrain_step.assign_add(1)
+
         return {'VAE loss': pretrain_loss}
 
     @tf.function
@@ -117,8 +112,8 @@ class Hu2017(tf.keras.Model):
         gradients = tape.gradient(encoder_loss, self.get_trainable_variables('encoder'))
         gradients = [tf.clip_by_norm(g, self.gradient_norm_clip) for g in gradients]
         self.optimizer.apply_gradients(zip(gradients, self.get_trainable_variables('encoder')))
-
         self.step.assign_add(1)
+
         return {
             'Discriminator loss': discriminator_loss,
             'Generator loss': generator_loss,
@@ -156,7 +151,7 @@ class Hu2017(tf.keras.Model):
         preds, mean, logvar = self(x, training=True, mask=mask, sample_style_prior=True,
                            sample_content_prior=False)  # (batch_size, max_timesteps, num_tokens)
 
-        reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=mask)
+        reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=None)
         kl_loss = self.loss_obj['KL'](mean, logvar)
 
         loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
@@ -176,7 +171,7 @@ class Hu2017(tf.keras.Model):
         # (batch_size, max_timesteps, num_tokens), (batch_size, d_content), (batch_size, d_content)
         preds, mean, logvar = self(x, training=True, mask=mask, sample_style_prior=False, sample_content_prior=False)
 
-        reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=mask)
+        reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=None)
         kl_loss = self.loss_obj['KL'](mean, logvar)
 
         loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
@@ -199,15 +194,14 @@ class Hu2017(tf.keras.Model):
         preds, mean, logvar = self(x, training=True, mask=mask, sample_style_prior=False,
                            sample_content_prior=False)  # (batch_size, max_timesteps, num_tokens)
 
-        reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=mask)
+        reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=None)
         kl_loss = self.loss_obj['KL'](mean, logvar)
 
         # (batch_size, max_timesteps, d_emb), (batch_size, d_content), (batch_size, d_content)
         x_sampled, content_sampled, style_sampled = self.generator.generate_soft_embeds(
             batch_size=batch_size, temp=temp, training=True)
 
-        # TODO Ensure that looking at mean z vector is correct
-        mean_content_sampled, _ = self.encoder(x_sampled, mask)  # (batch_size, d_content)
+        mean_content_sampled, _ = self.encoder(x_sampled, mask=None)  # (batch_size, d_content)
         preds_style_sampled = self.discriminator(x_sampled, training=True)  # (batch_size, d_style)
 
         content_loss = self.loss_obj['content'](content_sampled, mean_content_sampled)
@@ -260,9 +254,11 @@ class Hu2017(tf.keras.Model):
     def print_sampled_sentence(self, content=None, style=None):
 
         # x_sampled.shape == (1, max_timesteps, d_emb)
-        x_sampled = self.generator.generate_sentences(content=content, style=style, batch_size=1, temp=1.,
-                                                      training=False)[0][0]
-        x_sentence = " ".join([self.embedding_layer.token_idx['idx2token'][x.numpy()] for x in x_sampled])
+        x_sampled, content, style = self.generator.generate_sentences(content=content, style=style, batch_size=1,
+                                                                      temp=1., training=False)
+
+        x_sentence = str(style) + \
+            " ".join([self.embedding_layer.token_idx['idx2token'][x.numpy()] for x in x_sampled[0]])
 
         return x_sentence
 
@@ -277,14 +273,16 @@ class Encoder(tf.keras.layers.Layer):
             units=d_emb,
             dropout=dropout_rate,
             recurrent_dropout=dropout_rate,
-            return_sequences=False,
+            return_sequences=True,
+            return_state=True
         )
         self.mean = tf.keras.layers.Dense(d_content)
         self.logvar = tf.keras.layers.Dense(d_content)
 
-    def call(self, x, mask):
+    def call(self, x, mask=None):
 
-        output = self.encoder(x, mask=mask)  # (batch_size, d_emb)
+        outputs = self.encoder(x, mask=mask)  # (batch_size, d_emb)
+        output = outputs[1]
         mean = self.mean(output)  # (batch_size, d_content)
         logvar = self.mean(output)  # (batch_size, d_content)
 
@@ -313,7 +311,7 @@ class Decoder(tf.keras.layers.Layer):
 
         self.scores = tf.keras.layers.Dense(num_tokens)
 
-    def call(self, x, content, style, mask, training, initial_state=None):
+    def call(self, x, content, style, training, initial_state=None):
 
         batch_size, max_timesteps = tf.shape(x)[0], tf.shape(x)[1]
         d_content = tf.shape(content)[1]
@@ -325,7 +323,7 @@ class Decoder(tf.keras.layers.Layer):
         _style = tf.broadcast_to(style[:, tf.newaxis], (batch_size, max_timesteps, d_style))
         inputs_concat = tf.concat([_x, _content, _style], axis=-1)
 
-        rnn_outputs = self.decoder(inputs_concat, training=training, initial_state=initial_state, mask=mask)
+        rnn_outputs = self.decoder(inputs_concat, training=training, initial_state=initial_state)
 
         # decoder_outputs.shape == (batch_size, seq_len, d_emb)
         # hidden_state[0/1].shape == (batch_size, d_emb)
@@ -394,7 +392,7 @@ class Generator(tf.keras.layers.Layer):
             last_word_emb = self.embedding_layer(last_word)  # (batch_size, 1, d_emb)
             # scores.shape == (batch_size, 1, num_tokens)
             # hidden_state[0/1] = (batch_size, d_emb)
-            scores, hidden_state = self.decoder(last_word_emb, content, style, None, training, initial_state=hidden_state)
+            scores, hidden_state = self.decoder(last_word_emb, content, style, training, initial_state=hidden_state)
             sampling_dist = tfp.distributions.Categorical(
                 logits=scores/temp
             )
@@ -424,7 +422,7 @@ class Generator(tf.keras.layers.Layer):
         for i in range(self.max_timesteps-1):
             # scores.shape == (batch_size, 1, num_tokens)
             # hidden_state[0/1] = (batch_size, d_emb)
-            scores, hidden_state = self.decoder(last_word_emb, content, style, None, training, initial_state=hidden_state)
+            scores, hidden_state = self.decoder(last_word_emb, content, style, training, initial_state=hidden_state)
             softmax_scores = tf.nn.softmax(scores/temp)  # (batch_size, 1, num_tokens)
             last_word_emb = tf.matmul(softmax_scores, self.embedding_layer.weights[0])  # (batch_size, 1, d_emb)
             output.append(last_word_emb)
