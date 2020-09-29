@@ -24,8 +24,8 @@ class SST:
 
     def init_token_idx(self):
         token2idx = {x: self.encoder.encode(x)[0] for x in self.vocabulary}
-        token2idx[UNK_TOKEN] = 0
-        token2idx[PAD_TOKEN] = self.num_tokens - 1
+        token2idx[UNK_TOKEN] = self.num_tokens - 1
+        token2idx[PAD_TOKEN] = 0
         self.token_idx = {
             'token2idx': token2idx,
             'idx2token': {v: k for k, v in token2idx.items()}
