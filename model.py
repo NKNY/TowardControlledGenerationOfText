@@ -66,7 +66,7 @@ class Hu2017(tf.keras.Model):
             mean, logvar = None, None
             content = self.generator.sample_content_prior(batch_size)
         else:
-            mean, logvar = self.encoder(x_emb, mask=mask)
+            mean, logvar = self.encoder(x_emb, training=training, mask=mask)
             content = self.generator.sample_content(mean, logvar)
 
         # style.shape == (batch_size, max_timesteps, d_style)
@@ -200,7 +200,7 @@ class Hu2017(tf.keras.Model):
         x_sampled, content_sampled, style_sampled = self.generator.generate_soft_embeds(
             batch_size=batch_size, temp=temp, training=True)
 
-        mean_content_sampled, _ = self.encoder(x_sampled, mask=None)  # (batch_size, d_content)
+        mean_content_sampled, _ = self.encoder(x_sampled, training=True, mask=None)  # (batch_size, d_content)
         preds_style_sampled = self.discriminator(x_sampled, training=True)  # (batch_size, d_style)
 
         content_loss = self.loss_obj['content'](content_sampled, mean_content_sampled)
@@ -278,9 +278,9 @@ class Encoder(tf.keras.layers.Layer):
         self.mean = tf.keras.layers.Dense(d_content)
         self.logvar = tf.keras.layers.Dense(d_content)
 
-    def call(self, x, mask=None):
+    def call(self, x, training, mask=None):
 
-        outputs = self.encoder(x, mask=mask)  # (batch_size, d_emb)
+        outputs = self.encoder(x, training=training, mask=mask)  # (batch_size, d_emb)
         output = outputs[1]
         mean = self.mean(output)  # (batch_size, d_content)
         logvar = self.mean(output)  # (batch_size, d_content)
