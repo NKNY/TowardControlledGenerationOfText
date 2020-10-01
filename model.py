@@ -55,7 +55,7 @@ class Hu2017(tf.keras.Model):
 
         self.log_frequency_steps = log_frequency_steps
 
-    def call(self, x, training, mask, sample_style_prior=False, sample_content_prior=False):
+    def call(self, x, training_flags, mask, sample_style_prior=False, sample_content_prior=False):
 
         x_emb = self.embedding_layer(x)  # (batch_size, max_timesteps, d_emb)
         batch_size, max_timesteps, d_emb = tf.shape(x_emb)[0], tf.shape(x_emb)[1], tf.shape(x_emb)[2]
@@ -66,17 +66,17 @@ class Hu2017(tf.keras.Model):
             mean, logvar = None, None
             content = self.generator.sample_content_prior(batch_size)
         else:
-            mean, logvar = self.encoder(x_emb, training=training, mask=mask)
+            mean, logvar = self.encoder(x_emb, training=training_flags['encoder'], mask=mask)
             content = self.generator.sample_content(mean, logvar)
 
         # style.shape == (batch_size, max_timesteps, d_style)
         if sample_style_prior:
             style = self.generator.sample_style_prior(batch_size)
         else:
-            style = self.discriminator(x_emb, training)
+            style = self.discriminator(x_emb, training=training_flags['discriminator'])
 
         # preds.shape == (batch_size, max_timesteps, num_tokens)
-        preds, _ = self.generator.decoder(x_emb, content, style, training=training)
+        preds, _ = self.generator.decoder(x_emb, content, style, training=training_flags['generator'])
 
         return preds, mean, logvar
 
@@ -120,7 +120,6 @@ class Hu2017(tf.keras.Model):
         }
 
 
-
     def generate_autoencoder_targets(self, x):
 
         batch_size, max_timesteps = tf.shape(x)[0], tf.shape(x)[1]
@@ -142,12 +141,22 @@ class Hu2017(tf.keras.Model):
         }
         return trainable_variable_groups[group_name]
 
+    def get_training_flags(self, group_name):
+        training_flag_groups = {
+            'pretrain': {'encoder': True, 'generator': True, 'discriminator': False},
+            'discriminator': {'encoder': False, 'generator': False, 'discriminator': True},
+            'generator': {'encoder': False, 'generator': True, 'discriminator': False},
+            'encoder': {'encoder': True, 'generator': False, 'discriminator': False},
+        }
+        return training_flag_groups[group_name]
+
     def train_vae(self, x):
 
         targets = self.generate_autoencoder_targets(x)  # (batch_size, max_timesteps)
         mask = get_sequential_mask(x, self.embedding_layer.token_idx['token2idx'][PAD_TOKEN])
+        training_flags = self.get_training_flags('pretrain')
 
-        preds, mean, logvar = self(x, training=True, mask=mask, sample_style_prior=True,
+        preds, mean, logvar = self(x, training_flags=training_flags, mask=mask, sample_style_prior=True,
                            sample_content_prior=False)  # (batch_size, max_timesteps, num_tokens)
 
         reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=None)
@@ -166,9 +175,10 @@ class Hu2017(tf.keras.Model):
 
         targets = self.generate_autoencoder_targets(x)  # (batch_size, max_timesteps)
         mask = get_sequential_mask(x, self.embedding_layer.token_idx['token2idx'][PAD_TOKEN])
+        training_flags = self.get_training_flags('encoder')
 
         # (batch_size, max_timesteps, num_tokens), (batch_size, d_content), (batch_size, d_content)
-        preds, mean, logvar = self(x, training=True, mask=mask, sample_style_prior=False, sample_content_prior=False)
+        preds, mean, logvar = self(x, training_flags=training_flags, mask=mask, sample_style_prior=False, sample_content_prior=False)
 
         reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=None)
         kl_loss = self.loss_obj['KL'](mean, logvar)
@@ -186,11 +196,12 @@ class Hu2017(tf.keras.Model):
 
         batch_size = tf.shape(x)[0]
         temp = tf_temperature(self.step)
+        training_flags = self.get_training_flags('generator')
 
         targets = self.generate_autoencoder_targets(x)  # (batch_size, max_timesteps)
         mask = get_sequential_mask(x, self.embedding_layer.token_idx['token2idx'][PAD_TOKEN])
 
-        preds, mean, logvar = self(x, training=True, mask=mask, sample_style_prior=False,
+        preds, mean, logvar = self(x, training_flags=training_flags, mask=mask, sample_style_prior=False,
                            sample_content_prior=False)  # (batch_size, max_timesteps, num_tokens)
 
         reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=None)
@@ -198,10 +209,10 @@ class Hu2017(tf.keras.Model):
 
         # (batch_size, max_timesteps, d_emb), (batch_size, d_content), (batch_size, d_content)
         x_sampled, content_sampled, style_sampled = self.generator.generate_soft_embeds(
-            batch_size=batch_size, temp=temp, training=True)
+            batch_size=batch_size, temp=temp, training=training_flags['generator'])
 
-        mean_content_sampled, _ = self.encoder(x_sampled, training=True, mask=None)  # (batch_size, d_content)
-        preds_style_sampled = self.discriminator(x_sampled, training=True)  # (batch_size, d_style)
+        mean_content_sampled, _ = self.encoder(x_sampled, training=training_flags['encoder'], mask=None)  # (batch_size, d_content)
+        preds_style_sampled = self.discriminator(x_sampled, training=training_flags['discriminator'])  # (batch_size, d_style)
 
         content_loss = self.loss_obj['content'](content_sampled, mean_content_sampled)
         style_loss = self.loss_obj['style'](style_sampled, preds_style_sampled)
@@ -224,17 +235,19 @@ class Hu2017(tf.keras.Model):
 
         batch_size = tf.shape(x)[0]
         temp = 1.
+        training_flags = self.get_training_flags('discriminator')
 
         x_emb = self.embedding_layer(x)  # (batch_size, max_timesteps, d_emb)
 
         # IMPORTANT: Compared to the PyTorch implementation, style_sampled is not argmax'd
         # (batch_size, max_timesteps, d_emb), (batch_size, d_content), (batch_size, d_style)
-        x_sampled, _, style_sampled = self.generator.generate_sentences(batch_size=batch_size, temp=temp, training=True)
+        x_sampled, _, style_sampled = self.generator.generate_sentences(batch_size=batch_size, temp=temp,
+                                                                        training=training_flags['generator'])
         x_sampled_emb = self.embedding_layer(x_sampled)  # (batch_size, max_timesteps, d_emb)
 
         # x_concat_emb = tf.concat([x_emb, x_sampled_emb], axis=0)
-        preds = self.discriminator(x_emb, True)  # (batch_size, d_style)
-        preds_sampled = self.discriminator(x_sampled_emb, True)  # (batch_size, d_style)
+        preds = self.discriminator(x_emb, training_flags['discriminator'])  # (batch_size, d_style)
+        preds_sampled = self.discriminator(x_sampled_emb, training_flags['discriminator'])  # (batch_size, d_style)
 
         entropy = -tf.reduce_mean(tf.nn.log_softmax(preds_sampled, axis=1))
         loss_s = self.loss_obj['style'](targets, preds)
