@@ -438,7 +438,7 @@ class Discriminator(tf.keras.layers.Layer):
             tf.keras.layers.Conv1D(
                 filters=num_kernels,
                 kernel_size=x,
-                padding='valid',
+                padding='same',
                 activation=activation
             ) for x in ngram_sizes
         ]
