@@ -14,7 +14,6 @@ from itertools import chain
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from datasets import SST
 from utils import tf_temperature, KL_Loss, get_sequential_mask, CrossEntropyWithLogitsLoss
 
 START_TOKEN = "SOS"
@@ -460,38 +459,3 @@ class Discriminator(tf.keras.layers.Layer):
         scores = self.linear(self.dropout(ngram_outputs_concat, training=training))  # (batch_size, d_style)
 
         return scores
-
-if __name__ == "__main__":
-
-    d_emb = 200
-    d_content = 6
-    d_style = 2
-    num_kernels = 100
-    dropout_rate = 0.
-    discriminator_dropout_rate = 0.5
-    batch_size = 16
-    max_timesteps = 15
-    max_unpadded_timesteps = 15
-    ds = SST(max_timesteps, 100, verbose=True)
-    num_tokens = ds.num_tokens
-    style_dist_type = tfp.distributions.Multinomial
-    style_dist_params = {'total_count': num_tokens, 'probs': [0.5, 0.5]}
-    discriminator_params = {'num_kernels': num_kernels, 'activation': 'relu', 'ngram_sizes': [3, 4, 5]}
-    optimizer = tf.keras.optimizers.Adam()
-    loss_weights = {'KL': .1, 'style': .1, 'content': .1, 'u': .1, 'beta': .1}
-
-    m = Hu2017(d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, num_tokens, ds.token_idx,
-                     style_dist_type, style_dist_params, max_timesteps, discriminator_params, optimizer,
-                     loss_weights)
-
-    train_ds_iter = ds('train', batch_size, max_unpadded_timesteps).take(10).repeat()
-    for i, (x, targets) in enumerate(train_ds_iter.take(1000)):
-        m.train_step(x, targets, pretraining=True)
-        if i % 10 == 0:
-            print(i, m.print_sampled_sentence())
-
-    # test_ds_iter = ds('test', batch_size, max_unpadded_timesteps)
-    # for i, (x, targets) in enumerate(test_ds_iter.take(100)):
-    #     m.train_step(x, targets, pretraining=True)
-    #     if i % 10 == 0:
-    #         print(i, m.print_sampled_sentence())

@@ -5,7 +5,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from tqdm import tqdm
 
-from datasets import SST
+from datasets.datasets import SST
 from model import Hu2017
 
 def train_Hu2017_SST(dataset_args, model_args, training_loop_args):
@@ -24,8 +24,7 @@ class Hu2017ArgumentParser:
             'dropout_rate': {'default': 0., 'type': float},
             'discriminator_dropout_rate': {'default': .5, 'type': float},
             'batch_size': {'default': 15, 'type': int},
-            'max_timesteps': {'default': 15, 'type': int},
-            'max_unpadded_timesteps': {'default': 15, 'type': int},
+            'max_timesteps': {'default': 17, 'type': int},
             'style_dist_type': {'default': tfp.distributions.Multinomial},
             'style_dist_params': {'default': {'total_count': 1, 'probs': [0.5, 0.5]}},
             'discriminator_params': {'default': {'num_kernels': 100, 'activation': 'relu', 'ngram_sizes': [3, 4, 5]}},
@@ -57,7 +56,7 @@ class Hu2017ArgumentParser:
                     'model_dir'
                 ],
                 'call': [
-                    'num_training_steps', 'num_pretraining_steps', 'batch_size', 'max_unpadded_timesteps',
+                    'num_training_steps', 'num_pretraining_steps', 'batch_size',
                     'checkpoint_frequency_steps', 'log_frequency_steps'
                 ]
             }
@@ -91,11 +90,11 @@ class TrainingLoop:
             os.makedirs(self.checkpoint_prefix)
         self.checkpoint_manager.restore_or_initialize()
 
-    def __call__(self, num_pretraining_steps, num_training_steps, batch_size, max_unpadded_timesteps,
+    def __call__(self, num_pretraining_steps, num_training_steps, batch_size,
                  checkpoint_frequency_steps, log_frequency_steps):
 
         if self.model.step == 0:
-            pretraining_iterator = tqdm(enumerate(self.dataset('train', batch_size, max_unpadded_timesteps).take(num_pretraining_steps)))
+            pretraining_iterator = tqdm(enumerate(self.dataset('train', batch_size).take(num_pretraining_steps)))
             print(f'Starting pretraining for {num_pretraining_steps} steps.')
             for i, (input, targets) in pretraining_iterator:
                 losses = self.model.train_vae_step(input)
@@ -111,7 +110,7 @@ class TrainingLoop:
         else:
             print('Skipping pretraining.')
 
-        training_iterator = tqdm(enumerate(self.dataset('train', batch_size, max_unpadded_timesteps).take(num_training_steps)))
+        training_iterator = tqdm(enumerate(self.dataset('train', batch_size).take(num_training_steps)))
         print(f'Starting training for {num_training_steps} steps.')
         for i, (input, targets) in training_iterator:
             losses = self.model.train_step(input, targets)

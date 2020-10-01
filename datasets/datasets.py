@@ -31,16 +31,16 @@ class SST:
             'idx2token': {v: k for k, v in token2idx.items()}
         }
 
-    def __call__(self, split, batch_size, max_unpadded_timesteps):
+    def __call__(self, split, batch_size):
 
         padded_shapes = ([self.max_timesteps], [self.d_c])
         padding_values = (tf.cast(self.token_idx['token2idx'][PAD_TOKEN], dtype=tf.int64), None)
 
         return self.dataset[split]\
             .map(self.encode_input_map_fn)\
+            .filter(self.filter_on_len_lambda(self.max_timesteps))\
             .map(self.encode_label)\
             .shuffle(self.shuffle_buffer_size) \
-            .filter(self.filter_on_len_lambda(max_unpadded_timesteps))\
             .repeat()\
             .padded_batch(batch_size, padded_shapes=padded_shapes, padding_values=padding_values)
 
@@ -54,7 +54,8 @@ class SST:
 
         for sample in corpus:
             sample_tokens = self.tokenizer.tokenize(sample['sentence'].numpy())
-            vocabulary.update(sample_tokens)
+            if len(sample_tokens) <= self.max_timesteps - 2:
+                vocabulary.update(sample_tokens)
 
         vocabulary = [START_TOKEN, EOS_TOKEN] + list(vocabulary)
 
@@ -93,7 +94,7 @@ class SST:
 
 if __name__ == "__main__":
     ds = SST(100, 20)
-    for i in ds('train', 2, 15).take(2):
+    for i in ds('train', 2).take(2):
         print(i)
-    for i in ds('validation', 2, 15).take(2):
+    for i in ds('validation', 2).take(2):
         print(i)
