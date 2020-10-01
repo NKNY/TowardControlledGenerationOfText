@@ -269,10 +269,11 @@ class Hu2017(tf.keras.Model):
         x_sampled, content, style = self.generator.generate_sentences(content=content, style=style, batch_size=1,
                                                                       temp=1., training=False)
 
-        x_sentence = str(style) + \
-            " ".join([self.embedding_layer.token_idx['idx2token'][x.numpy()] for x in x_sampled[0]])
+        style_str = str(style.numpy()[0])
+        sentence_str = " ".join([self.embedding_layer.token_idx['idx2token'][x.numpy()] for x in x_sampled[0]])
+        output = style_str + ' ' + sentence_str
 
-        return x_sentence
+        return output
 
 
 
