@@ -37,6 +37,8 @@ class Hu2017ArgumentParser:
             'checkpoint_frequency_steps': {'default': 10, 'type': int},
             'log_frequency_steps': {'default': 10, 'type': int},
             'log_dir': {'default': '/Users/nknyazev/Documents/CS/projects/text_style_transfer/models/Hu2017'},
+            'dataset_version': {'default': 'hu'},
+            'dataset_dir': {'default': '/Users/nknyazev/Documents/CS/projects/text_style_transfer/data/SST2'}
         }
         self.param_groups = {
             'model_args': {
@@ -48,7 +50,7 @@ class Hu2017ArgumentParser:
         },
             'dataset_args': {
                 'init': [
-                    'max_timesteps', 'shuffle_buffer_size'
+                    'max_timesteps', 'shuffle_buffer_size', 'dataset_version', 'dataset_dir'
                 ]
             },
             'training_loop_args': {

@@ -42,3 +42,17 @@ It seems that the issue of sentences not ending with EOS is fixed by a combinati
 loss and including them in the total loss. Furthermore, encoder was previously ignoring any masking and outputting the
 outputs from the end of the sequence, which was likely associated with padding. Changed this to return the output from
 the last unpadded step (EOS). Also fixed incorrect use of mask for the generated samples. 
+
+The above changes appear to have allowed the model to memorise all the samples correctly, including everything that
+happens after EOS. However it is also observed that different class labels still lead to the generation of the same
+sentence - the model may not be learning to map the sentence to the class - might need to increase the weight.
+Furthermore, still, restarting the training leads to samples in the first few steps of the second round of training
+that are unlike those seen at the end of the first round.
+
+### 01.09.20
+Fixed a bug whereby the vocabulary included words that were only present in sentences that were later filtered out
+due to their length. Removed max_unpadded_timesteps. Default sentence length is now 17 (15+SOS+EOS).
+Added a script to generate the same data used by Hu et al (as opposed to the glue version of SST-2) and a flag to choose
+which data to consume during training.
+
+TODO: Address the issues from the last paragraph of 29.09 + figure out the hidden state initialisation.

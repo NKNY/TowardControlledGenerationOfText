@@ -1,3 +1,5 @@
+import os
+
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
@@ -9,7 +11,7 @@ UNK_TOKEN = "UNK"
 PAD_TOKEN = ""
 
 class SST:
-    def __init__(self, max_timesteps, shuffle_buffer_size, verbose=True):
+    def __init__(self, max_timesteps, shuffle_buffer_size, dataset_version='hu', dataset_dir=None, verbose=True):
 
         self.max_timesteps = max_timesteps
         self.shuffle_buffer_size = shuffle_buffer_size
@@ -17,7 +19,7 @@ class SST:
 
         self.splits = {}
 
-        self.dataset = tfds.load('glue/sst2')
+        self.dataset = self.load_dataset(dataset_version, dataset_dir)
         self.init_tokenizer(self.dataset['train'], verbose=verbose)
         self.encoder = tfds.features.text.TokenTextEncoder(self.vocabulary, oov_token=UNK_TOKEN)
         self.init_token_idx()
@@ -30,6 +32,34 @@ class SST:
             'token2idx': token2idx,
             'idx2token': {v: k for k, v in token2idx.items()}
         }
+
+    def load_dataset(self, dataset_version, dataset_dir=None):
+
+        # Create a description of the features.
+        feature_description = {
+            'sentence': tf.io.FixedLenFeature([], tf.string, default_value=''),
+            'label': tf.io.FixedLenFeature([], tf.int64, default_value=0)
+        }
+
+        def _parse_function(example_proto):
+            # Parse the input `tf.train.Example` proto using the dictionary above.
+            return tf.io.parse_single_example(example_proto, feature_description)
+
+        assert dataset_version in ['glue', 'hu']
+
+        if dataset_version == 'glue':
+            return tfds.load('glue/sst2')
+
+        elif dataset_version == 'hu':
+            subsets = ['train', 'validation', 'test']
+            assert dataset_dir is not None and os.path.exists(dataset_dir) and \
+                   all([f'{x}.tfrecords' in os.listdir(dataset_dir) for x in subsets])
+
+            subset_paths = {s: os.path.join(dataset_dir, f'{s}.tfrecords') for s in subsets}
+            raw_subsets = {s: tf.data.TFRecordDataset([p]) for s, p in subset_paths.items()}
+            dataset = {s: d.map(_parse_function) for s,d in raw_subsets.items()}
+
+            return dataset
 
     def __call__(self, split, batch_size):
 
