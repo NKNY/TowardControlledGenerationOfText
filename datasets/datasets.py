@@ -87,7 +87,7 @@ class SST:
             if len(sample_tokens) <= self.max_timesteps - 2:
                 vocabulary.update(sample_tokens)
 
-        vocabulary = [START_TOKEN, EOS_TOKEN] + list(vocabulary)
+        vocabulary = [START_TOKEN, EOS_TOKEN] + sorted(list(vocabulary))
 
         self.vocabulary = vocabulary
         self.num_tokens = len(vocabulary) + 2  # +1 for PAD, +1 for UNK

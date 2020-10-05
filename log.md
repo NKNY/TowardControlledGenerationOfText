@@ -55,4 +55,30 @@ due to their length. Removed max_unpadded_timesteps. Default sentence length is 
 Added a script to generate the same data used by Hu et al (as opposed to the glue version of SST-2) and a flag to choose
 which data to consume during training.
 
-TODO: Address the issues from the last paragraph of 29.09 + figure out the hidden state initialisation.
+Made it so that separate parts of the model get the True `training` flag only when they are being trained e.g. 
+the discriminator doesn't apply dropout when we're training the generator. This may potentially stabilise the training
+procedure following pretraining. May wish to separately see whether just setting dropout to 0 benefits the model
+training.
+
+Examined the classifier from Hu et al. 2016a that Hu et al. 2017 uses to measure validation accuracy. Turns out it's
+a separate classifier leveraging knowledge distillation. Hu provides a big uncommented wall of code implementation in 
+theano. The options are to either try to minimally adapt the code to be able to run it on generated samples in theano,
+recreate it with tensorflow or find an alternative classifier to measure the performance. 
+
+For hidden state init decided that theoretically there is not much difference between training and not training the
+initial hidden state.
+
+### 02.09.20
+Ran 10+20K w/o regularisation. Most losses were still going down at 20K steps but generator style and content losses
+are fluctuating/going up over time. It appears the most logical to fix the issues with restarting from a saved
+checkpoing and then train the model with a very low number of datapoints (possibly reduce the dimensionality) to see
+if the model is able to reconstruct correct samples given a class.
+
+### 05.09.20
+Restarting from 1+0K checkpoint showed that the restarted model is generally able to maintain the pattern of having SOS
+and EOS at the start and the end of the sentence. Additional inspection of the dataset initialisation identified that
+instantiating the dataset in a different runtime leads to different token2idx mappings as well as even different
+vocabularies. This is due to the use of sets. Fixed this. 
+
+
+TODO: Address the issues from the last paragraph of 29.09
