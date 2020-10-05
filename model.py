@@ -318,10 +318,6 @@ class Decoder(tf.keras.layers.Layer):
             return_sequences=True,
             return_state=True
         )
-        self.initial_state = (
-            tf.Variable(initial_value=tf.random.normal([1, d_emb]), trainable=True),
-            tf.Variable(initial_value=tf.random.normal([1, d_emb]), trainable=True)
-        )
 
 
         self.embedding_dropout = tf.keras.layers.Dropout(dropout_rate)
@@ -340,11 +336,6 @@ class Decoder(tf.keras.layers.Layer):
         _style = tf.broadcast_to(style[:, tf.newaxis], (batch_size, max_timesteps, d_style))
         inputs_concat = tf.concat([_x, _content, _style], axis=-1)
 
-        if initial_state is None:
-            initial_state = (
-                tf.broadcast_to(self.initial_state[0], (batch_size, self.d_emb)),
-                tf.broadcast_to(self.initial_state[1], (batch_size, self.d_emb))
-            )
         rnn_outputs = self.decoder(inputs_concat, training=training, initial_state=initial_state)
 
         # decoder_outputs.shape == (batch_size, seq_len, d_emb)
