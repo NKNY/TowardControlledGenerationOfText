@@ -75,8 +75,11 @@ class Hu2017(tf.keras.Model):
         else:
             style = self.discriminator(x_emb, training=training_flags['discriminator'])
 
+        initial_state = self.generator.decoder.get_lstm_initial_state(content, style)  # (batch_size, d_content+d_style)
+
         # preds.shape == (batch_size, max_timesteps, num_tokens)
-        preds, _ = self.generator.decoder(x_emb, content, style, training=training_flags['generator'])
+        preds, _ = self.generator.decoder(x_emb, content, style, training=training_flags['generator'],
+                                          initial_state=initial_state)
 
         return preds, mean, logvar
 
@@ -324,6 +327,11 @@ class Decoder(tf.keras.layers.Layer):
 
         self.scores = tf.keras.layers.Dense(num_tokens)
 
+    @staticmethod
+    def get_lstm_initial_state(content, style):
+        initial_state = tf.concat([content, style], axis=-1)
+        return initial_state, initial_state
+
     def call(self, x, content, style, training, initial_state=None):
 
         batch_size, max_timesteps = tf.shape(x)[0], tf.shape(x)[1]
@@ -399,7 +407,7 @@ class Generator(tf.keras.layers.Layer):
         # last_word.shape == (batch_size, 1)
         last_word = tf.broadcast_to(self.embedding_layer.token_idx['token2idx'][START_TOKEN], (batch_size, 1))
         output = [last_word]
-        hidden_state = None
+        hidden_state = self.decoder.get_lstm_initial_state(content, style)
 
         for i in range(self.max_timesteps-1):
             last_word_emb = self.embedding_layer(last_word)  # (batch_size, 1, d_emb)
@@ -430,7 +438,7 @@ class Generator(tf.keras.layers.Layer):
         last_word = tf.broadcast_to(self.embedding_layer.token_idx['token2idx'][START_TOKEN], (batch_size, 1))
         last_word_emb = self.embedding_layer(last_word)  # (batch_size, 1, d_emb)
         output = [last_word_emb]
-        hidden_state = None
+        hidden_state = self.decoder.get_lstm_initial_state(content, style)
 
         for i in range(self.max_timesteps-1):
             # scores.shape == (batch_size, 1, num_tokens)

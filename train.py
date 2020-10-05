@@ -19,7 +19,7 @@ class Hu2017ArgumentParser:
         self.parser = ArgumentParser()
         self.defaults = {
             'd_emb': {'default': 300, 'type': int},
-            'd_content': {'default': 300, 'type': int},
+            'd_content': {'default': 298, 'type': int},
             'd_style': {'default': 2, 'type': int},
             'dropout_rate': {'default': 0., 'type': float},
             'discriminator_dropout_rate': {'default': .5, 'type': float},
