@@ -80,5 +80,7 @@ and EOS at the start and the end of the sentence. Additional inspection of the d
 instantiating the dataset in a different runtime leads to different token2idx mappings as well as even different
 vocabularies. This is due to the use of sets. Fixed this. 
 
+Furthermore, made all inputs to the model lowercase.
+
 
 TODO: Address the issues from the last paragraph of 29.09

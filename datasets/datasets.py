@@ -83,7 +83,7 @@ class SST:
         corpus = tqdm(corpus) if verbose else corpus
 
         for sample in corpus:
-            sample_tokens = self.tokenizer.tokenize(sample['sentence'].numpy())
+            sample_tokens = self.tokenizer.tokenize(sample['sentence'].numpy().lower())
             if len(sample_tokens) <= self.max_timesteps - 2:
                 vocabulary.update(sample_tokens)
 
@@ -94,7 +94,7 @@ class SST:
 
 
     def encode_input(self, text_tensor, label):
-        encoded_text = self.encoder.encode(str.encode(START_TOKEN + " ") + text_tensor.numpy() + str.encode(" " + EOS_TOKEN))
+        encoded_text = self.encoder.encode(str.encode(START_TOKEN + " ") + text_tensor.numpy().lower() + str.encode(" " + EOS_TOKEN))
         return encoded_text, label
 
     def encode_input_map_fn(self, input):
