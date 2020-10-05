@@ -78,7 +78,7 @@ class Hu2017(tf.keras.Model):
         initial_state = self.generator.decoder.get_lstm_initial_state(content, style)  # (batch_size, d_content+d_style)
 
         # preds.shape == (batch_size, max_timesteps, num_tokens)
-        preds, _ = self.generator.decoder(x_emb, content, style, training=training_flags['generator'],
+        preds, _ = self.generator.decoder(x_emb, training=training_flags['generator'],
                                           initial_state=initial_state)
 
         return preds, mean, logvar
@@ -332,19 +332,14 @@ class Decoder(tf.keras.layers.Layer):
         initial_state = tf.concat([content, style], axis=-1)
         return initial_state, initial_state
 
-    def call(self, x, content, style, training, initial_state=None):
+    def call(self, x, training, initial_state=None):
 
         batch_size, max_timesteps = tf.shape(x)[0], tf.shape(x)[1]
-        d_content = tf.shape(content)[1]
-        d_style = tf.shape(style)[1]
 
         # inputs_concat.shape == (batch_size, d_emb+d_content+d_style)
         _x = self.embedding_dropout(x)
-        _content = tf.broadcast_to(content[:, tf.newaxis], (batch_size, max_timesteps, d_content))
-        _style = tf.broadcast_to(style[:, tf.newaxis], (batch_size, max_timesteps, d_style))
-        inputs_concat = tf.concat([_x, _content, _style], axis=-1)
 
-        rnn_outputs = self.decoder(inputs_concat, training=training, initial_state=initial_state)
+        rnn_outputs = self.decoder(_x, training=training, initial_state=initial_state)
 
         # decoder_outputs.shape == (batch_size, seq_len, d_emb)
         # hidden_state[0/1].shape == (batch_size, d_emb)
@@ -413,7 +408,7 @@ class Generator(tf.keras.layers.Layer):
             last_word_emb = self.embedding_layer(last_word)  # (batch_size, 1, d_emb)
             # scores.shape == (batch_size, 1, num_tokens)
             # hidden_state[0/1] = (batch_size, d_emb)
-            scores, hidden_state = self.decoder(last_word_emb, content, style, training, initial_state=hidden_state)
+            scores, hidden_state = self.decoder(last_word_emb, training, initial_state=hidden_state)
             sampling_dist = tfp.distributions.Categorical(
                 logits=scores/temp
             )
@@ -443,7 +438,7 @@ class Generator(tf.keras.layers.Layer):
         for i in range(self.max_timesteps-1):
             # scores.shape == (batch_size, 1, num_tokens)
             # hidden_state[0/1] = (batch_size, d_emb)
-            scores, hidden_state = self.decoder(last_word_emb, content, style, training, initial_state=hidden_state)
+            scores, hidden_state = self.decoder(last_word_emb, training, initial_state=hidden_state)
             softmax_scores = tf.nn.softmax(scores/temp)  # (batch_size, 1, num_tokens)
             last_word_emb = tf.matmul(softmax_scores, self.embedding_layer.weights[0])  # (batch_size, 1, d_emb)
             output.append(last_word_emb)
