@@ -10,7 +10,8 @@ from model import Hu2017
 
 def train_Hu2017_SST(dataset_args, model_args, training_loop_args):
     dataset = SST(**dataset_args['init'])
-    model = Hu2017(token_idx=dataset.token_idx, **model_args['init'])
+    model = Hu2017(token_idx=dataset.token_idx, pretrained_embeddings=dataset.pretrained_embeddings,
+                   **model_args['init'])
     training_loop = TrainingLoop(model, dataset, **training_loop_args['init'])
     training_loop(**training_loop_args['call'])
 
@@ -38,7 +39,9 @@ class Hu2017ArgumentParser:
             'log_frequency_steps': {'default': 10, 'type': int},
             'log_dir': {'default': '/Users/nknyazev/Documents/CS/projects/text_style_transfer/models/Hu2017'},
             'dataset_version': {'default': 'hu'},
-            'dataset_dir': {'default': '/Users/nknyazev/Documents/CS/projects/text_style_transfer/data/SST2'}
+            'dataset_dir': {'default': '/Users/nknyazev/Documents/CS/projects/text_style_transfer/data/SST2'},
+            'pretrain_embeddings': {'default': 'en_vectors_web_lg'},
+            'embedding_initializer': {'default': tf.keras.initializers.GlorotNormal()}
         }
         self.param_groups = {
             'model_args': {
@@ -50,7 +53,8 @@ class Hu2017ArgumentParser:
         },
             'dataset_args': {
                 'init': [
-                    'max_timesteps', 'shuffle_buffer_size', 'dataset_version', 'dataset_dir'
+                    'max_timesteps', 'shuffle_buffer_size', 'dataset_version', 'dataset_dir', 'pretrain_embeddings',
+                    'embedding_initializer'
                 ]
             },
             'training_loop_args': {

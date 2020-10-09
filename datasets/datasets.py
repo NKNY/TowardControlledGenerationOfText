@@ -1,17 +1,18 @@
 import os
 
+import spacy
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
 from tqdm import tqdm
-
 START_TOKEN = "SOS"
 EOS_TOKEN = "EOS"
 UNK_TOKEN = "UNK"
 PAD_TOKEN = ""
 
 class SST:
-    def __init__(self, max_timesteps, shuffle_buffer_size, dataset_version='hu', dataset_dir=None, verbose=True):
+    def __init__(self, max_timesteps, shuffle_buffer_size, dataset_version='hu', dataset_dir=None,
+                 pretrain_embeddings=False, embedding_initializer=None, verbose=True):
 
         self.max_timesteps = max_timesteps
         self.shuffle_buffer_size = shuffle_buffer_size
@@ -23,6 +24,27 @@ class SST:
         self.init_tokenizer(self.dataset['train'], verbose=verbose)
         self.encoder = tfds.features.text.TokenTextEncoder(self.vocabulary, oov_token=UNK_TOKEN)
         self.init_token_idx()
+        self.pretrained_embeddings = None if pretrain_embeddings == "False" \
+            else self.load_pretrained_embeddings(pretrain_embeddings, embedding_initializer)
+
+    def load_pretrained_embeddings(self, pretrain_embeddings, initializer):
+
+        assert pretrain_embeddings in ['en_vectors_web_lg']
+        assert initializer is not None
+
+        print(f'Loading pretrained embeddings {pretrain_embeddings}')
+
+        if pretrain_embeddings == 'en_vectors_web_lg':
+            nlp = spacy.load('en_vectors_web_lg')
+            d_emb = nlp.vocab.vectors.shape[1]
+            embeddings = initializer(shape=(self.num_tokens, d_emb)).numpy()
+            for idx, token in tqdm(self.token_idx['idx2token'].items()):
+                for t in nlp(token):
+                    if t.has_vector:
+                        embeddings[idx] = t.vector
+
+        return embeddings
+
 
     def init_token_idx(self):
         token2idx = {x: self.encoder.encode(x)[0] for x in self.vocabulary}

@@ -24,11 +24,12 @@ PAD_TOKEN = ""
 class Hu2017(tf.keras.Model):
 
     def __init__(self, d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, token_idx,
-                 style_dist_type, style_dist_params, max_timesteps, discriminator_params, optimizer, loss_weights,
-                 probs_sum_to_one=True, gradient_norm_clip=5, log_dir=None, log_frequency_steps=10):
+                 pretrained_embeddings, style_dist_type, style_dist_params, max_timesteps, discriminator_params,
+                 optimizer, loss_weights, probs_sum_to_one=True, gradient_norm_clip=5, log_dir=None,
+                 log_frequency_steps=10):
         super().__init__()
 
-        self.embedding_layer = EmbeddingLayer(token_idx, d_emb)
+        self.embedding_layer = EmbeddingLayer(token_idx, d_emb, pretrained_embeddings)
         self.encoder = Encoder(d_emb, d_content, dropout_rate)
         self.generator = Generator(d_emb, d_content, dropout_rate,
                                    style_dist_type, style_dist_params,
@@ -356,9 +357,11 @@ class Decoder(tf.keras.layers.Layer):
 
 class EmbeddingLayer(tf.keras.layers.Layer):
 
-    def __init__(self, token_idx, d_emb):
+    def __init__(self, token_idx, d_emb, pretrained_embeddings):
         super().__init__()
-        self.embeddings = tf.keras.layers.Embedding(len(token_idx['token2idx']), d_emb)
+        embeddings_initializer = None if pretrained_embeddings is None else tf.initializers.Constant(pretrained_embeddings)
+        self.embeddings = tf.keras.layers.Embedding(len(token_idx['token2idx']), d_emb,
+                                                    embeddings_initializer=embeddings_initializer)
         self.token_idx = token_idx
         self.d_emb = d_emb
 
