@@ -23,15 +23,15 @@ PAD_TOKEN = ""
 
 class Hu2017(tf.keras.Model):
 
-    def __init__(self, d_emb, d_content, d_style, dropout_rate, discriminator_dropout_rate, token_idx,
-                 pretrained_embeddings, style_dist_type, style_dist_params, max_timesteps, discriminator_params,
-                 optimizer, loss_weights, probs_sum_to_one=True, gradient_norm_clip=5, log_dir=None,
-                 log_frequency_steps=10):
+    def __init__(self, d_emb, d_content, d_style, dropout_rate, token_dropout_rate, discriminator_dropout_rate,
+                 token_idx, pretrained_embeddings, style_dist_type, style_dist_params, max_timesteps,
+                 discriminator_params, optimizer, loss_weights, probs_sum_to_one=True, gradient_norm_clip=5,
+                 log_dir=None, log_frequency_steps=10):
         super().__init__()
 
         self.embedding_layer = EmbeddingLayer(token_idx, d_emb, pretrained_embeddings)
         self.encoder = Encoder(d_emb, d_content, dropout_rate)
-        self.generator = Generator(d_emb, d_content, dropout_rate,
+        self.generator = Generator(d_emb, d_content, token_dropout_rate,
                                    style_dist_type, style_dist_params,
                                    self.embedding_layer, max_timesteps)
         self.discriminator = Discriminator(d_style, dropout_rate=discriminator_dropout_rate, **discriminator_params)
@@ -77,6 +77,12 @@ class Hu2017(tf.keras.Model):
             style = self.discriminator(x_emb, training=training_flags['discriminator'])
 
         initial_state = self.generator.decoder.get_lstm_initial_state(content, style)  # (batch_size, d_content+d_style)
+
+        # Apply word level dropout
+        if (training_flags['encoder'] or training_flags['generator']) and self.generator.token_dropout_rate > 0:
+            _x = self.token_level_dropout(x, self.generator.token_dropout_rate,
+                                             self.embedding_layer.token_idx['token2idx'][UNK_TOKEN])
+            x_emb = self.embedding_layer(_x)
 
         # preds.shape == (batch_size, max_timesteps, num_tokens)
         preds, _ = self.generator.decoder(x_emb, training=training_flags['generator'],
@@ -235,6 +241,15 @@ class Hu2017(tf.keras.Model):
 
         return loss
 
+    @staticmethod
+    def token_level_dropout(x, token_dropout_rate, unk_token_idx):
+        batch_size, max_timesteps = tf.shape(x)[0], tf.shape(x)[1]
+        bernoulli = tfp.distributions.Bernoulli(probs=token_dropout_rate)
+        mask = tf.cast(bernoulli.sample((batch_size, max_timesteps)), tf.bool)
+        unk_tensor = tf.cast(tf.ones_like(x) * unk_token_idx, x.dtype)
+        masked_x = tf.where(mask, unk_tensor, x)
+        return masked_x
+
     def train_discriminator(self, x, targets):
 
         batch_size = tf.shape(x)[0]
@@ -280,7 +295,6 @@ class Hu2017(tf.keras.Model):
         return output
 
 
-
 class Encoder(tf.keras.layers.Layer):
 
     def __init__(self, d_emb, d_content, dropout_rate):
@@ -309,23 +323,16 @@ class Encoder(tf.keras.layers.Layer):
 
 class Decoder(tf.keras.layers.Layer):
 
-    def __init__(self, d_emb, dropout_rate, num_tokens):
+    def __init__(self, d_emb, num_tokens):
         super().__init__()
 
         self.num_tokens = num_tokens
         self.d_emb = d_emb
-        # IMPORTANT: Compared to the PyTorch implementation, no word level dropout is applied.
-        # Instead of replacing each dropped out word with an <unk> character, dropout is
-        # applied to token embeddings.
         self.decoder = tf.keras.layers.LSTM(
             units=d_emb,
             return_sequences=True,
             return_state=True
         )
-
-
-        self.embedding_dropout = tf.keras.layers.Dropout(dropout_rate)
-
         self.scores = tf.keras.layers.Dense(num_tokens)
 
     @staticmethod
@@ -337,10 +344,7 @@ class Decoder(tf.keras.layers.Layer):
 
         batch_size, max_timesteps = tf.shape(x)[0], tf.shape(x)[1]
 
-        # inputs_concat.shape == (batch_size, d_emb+d_content+d_style)
-        _x = self.embedding_dropout(x)
-
-        rnn_outputs = self.decoder(_x, training=training, initial_state=initial_state)
+        rnn_outputs = self.decoder(x, training=training, initial_state=initial_state)
 
         # decoder_outputs.shape == (batch_size, seq_len, d_emb)
         # hidden_state[0/1].shape == (batch_size, d_emb)
@@ -370,16 +374,17 @@ class EmbeddingLayer(tf.keras.layers.Layer):
 
 class Generator(tf.keras.layers.Layer):
 
-    def __init__(self, d_emb, d_content, dropout_rate, style_dist_type,
+    def __init__(self, d_emb, d_content, token_dropout_rate, style_dist_type,
                  style_dist_params, embedding_layer, max_timesteps):
         super().__init__()
 
         self.num_tokens = len(embedding_layer.token_idx['token2idx'])
         self.d_content = d_content
         self.style_dist = self.init_style_dist(style_dist_type, **style_dist_params)
-        self.decoder = Decoder(d_emb, dropout_rate, self.num_tokens)
+        self.decoder = Decoder(d_emb, self.num_tokens)
         self.embedding_layer = embedding_layer
         self.max_timesteps = max_timesteps
+        self.token_dropout_rate = token_dropout_rate
 
     @staticmethod
     def init_style_dist(style_dist_type, **style_dist_params):

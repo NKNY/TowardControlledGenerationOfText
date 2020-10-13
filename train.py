@@ -23,6 +23,7 @@ class Hu2017ArgumentParser:
             'd_content': {'default': 298, 'type': int},
             'd_style': {'default': 2, 'type': int},
             'dropout_rate': {'default': 0., 'type': float},
+            'token_dropout_rate': {'default': 0., 'type': float},
             'discriminator_dropout_rate': {'default': .5, 'type': float},
             'batch_size': {'default': 15, 'type': int},
             'max_timesteps': {'default': 17, 'type': int},
@@ -41,12 +42,12 @@ class Hu2017ArgumentParser:
             'dataset_version': {'default': 'hu'},
             'dataset_dir': {'default': '/Users/nknyazev/Documents/CS/projects/text_style_transfer/data/SST2'},
             'pretrain_embeddings': {'default': 'en_vectors_web_lg'},
-            'embedding_initializer': {'default': tf.keras.initializers.GlorotNormal()}
+            'embedding_initializer': {'default': tf.keras.initializers.GlorotNormal()},
         }
         self.param_groups = {
             'model_args': {
                 'init': [
-                    'd_emb', 'd_content', 'd_style', 'dropout_rate', 'discriminator_dropout_rate',
+                    'd_emb', 'd_content', 'd_style', 'dropout_rate', 'token_dropout_rate', 'discriminator_dropout_rate',
                     'style_dist_type', 'style_dist_params', 'max_timesteps', 'discriminator_params', 'optimizer',
                     'loss_weights', 'log_dir', 'log_frequency_steps'
             ],
