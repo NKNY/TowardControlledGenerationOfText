@@ -57,6 +57,8 @@ class Hu2017(tf.keras.Model):
             self.writer.set_as_default()
 
         self.log_frequency_steps = log_frequency_steps
+        self.loss_weights['KL'] = lambda: min(1., tf.cast((self.step + self.pretrain_step), tf.float32)/1e6)
+
 
     def call(self, x, training_flags, mask, sample_style_prior=False, sample_content_prior=False):
 
@@ -93,7 +95,7 @@ class Hu2017(tf.keras.Model):
 
         return preds, mean, logvar
 
-    @tf.function
+    # @tf.function
     def train_vae_step(self, x):
         with tf.GradientTape() as tape:
             pretrain_loss = self.train_vae(x)
@@ -104,7 +106,7 @@ class Hu2017(tf.keras.Model):
 
         return {'VAE loss': pretrain_loss}
 
-    @tf.function
+    # @tf.function
     def train_step(self, x, targets):
 
         with tf.GradientTape() as tape:
@@ -175,7 +177,7 @@ class Hu2017(tf.keras.Model):
         reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=None)
         kl_loss = self.loss_obj['KL'](mean, logvar)
 
-        loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
+        loss = reconstruction_loss + self.loss_weights['KL']() * kl_loss
 
         if self.writer is not None and self.pretrain_step % self.log_frequency_steps == 0:
             tf.summary.scalar('train_vae_reconstruction_loss', reconstruction_loss, step=self.pretrain_step)
@@ -196,7 +198,7 @@ class Hu2017(tf.keras.Model):
         reconstruction_loss = self.loss_obj['reconstruction'](targets, preds, sample_weight=None)
         kl_loss = self.loss_obj['KL'](mean, logvar)
 
-        loss = reconstruction_loss + self.loss_weights['KL'] * kl_loss
+        loss = reconstruction_loss + self.loss_weights['KL']() * kl_loss
 
         if self.writer is not None and self.step % self.log_frequency_steps == 0:
             tf.summary.scalar('train_encoder_reconstruction_loss', reconstruction_loss, step=self.step)
@@ -231,7 +233,7 @@ class Hu2017(tf.keras.Model):
         style_loss = self.loss_obj['style'](style_sampled, preds_style_sampled)
 
         loss = (reconstruction_loss
-                + self.loss_weights['KL'] * kl_loss
+                + self.loss_weights['KL']() * kl_loss
                 + self.loss_weights['content'] * content_loss
                 + self.loss_weights['style'] * style_loss)
 
