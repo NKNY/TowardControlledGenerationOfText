@@ -20,8 +20,9 @@ class Hu2017ArgumentParser:
         self.parser = ArgumentParser()
         self.defaults = {
             'd_emb': {'default': 300, 'type': int},
-            'd_content': {'default': 298, 'type': int},
+            'd_content': {'default': 150, 'type': int},
             'd_style': {'default': 2, 'type': int},
+            'd_style_emb': {'default': 150, 'type': int},
             'dropout_rate': {'default': 0., 'type': float},
             'token_dropout_rate': {'default': 0., 'type': float},
             'discriminator_dropout_rate': {'default': .5, 'type': float},
@@ -49,7 +50,7 @@ class Hu2017ArgumentParser:
                 'init': [
                     'd_emb', 'd_content', 'd_style', 'dropout_rate', 'token_dropout_rate', 'discriminator_dropout_rate',
                     'style_dist_type', 'style_dist_params', 'max_timesteps', 'discriminator_params', 'optimizer',
-                    'loss_weights', 'log_dir', 'log_frequency_steps'
+                    'loss_weights', 'log_dir', 'log_frequency_steps', 'd_style_emb'
             ],
         },
             'dataset_args': {

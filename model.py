@@ -23,17 +23,19 @@ PAD_TOKEN = ""
 
 class Hu2017(tf.keras.Model):
 
-    def __init__(self, d_emb, d_content, d_style, dropout_rate, token_dropout_rate, discriminator_dropout_rate,
+    def __init__(self, d_emb, d_content, d_style, d_style_emb, dropout_rate, token_dropout_rate, discriminator_dropout_rate,
                  token_idx, pretrained_embeddings, style_dist_type, style_dist_params, max_timesteps,
                  discriminator_params, optimizer, loss_weights, probs_sum_to_one=True, gradient_norm_clip=5,
                  log_dir=None, log_frequency_steps=10):
         super().__init__()
 
         self.embedding_layer = EmbeddingLayer(token_idx, d_emb, pretrained_embeddings)
+        self.style_embedding_layer = StyleEmbeddingLayer(d_style_emb)
         self.encoder = Encoder(d_emb, d_content, dropout_rate)
         self.generator = Generator(d_emb, d_content, token_dropout_rate,
                                    style_dist_type, style_dist_params,
-                                   self.embedding_layer, max_timesteps)
+                                   self.embedding_layer, max_timesteps,
+                                   self.style_embedding_layer)
         self.discriminator = Discriminator(d_style, dropout_rate=discriminator_dropout_rate, **discriminator_params)
 
         self.optimizer = optimizer
@@ -72,9 +74,10 @@ class Hu2017(tf.keras.Model):
 
         # style.shape == (batch_size, max_timesteps, d_style)
         if sample_style_prior:
-            style = self.generator.sample_style_prior(batch_size)
+            _style = self.generator.sample_style_prior(batch_size)
         else:
-            style = self.discriminator(x_emb, training=training_flags['discriminator'])
+            _style = self.discriminator(x_emb, training=training_flags['discriminator'])
+        style = self.style_embedding_layer(_style, mode='encode')
 
         initial_state = self.generator.decoder.get_lstm_initial_state(content, style)  # (batch_size, d_content+d_style)
 
@@ -333,6 +336,7 @@ class Decoder(tf.keras.layers.Layer):
             return_sequences=True,
             return_state=True
         )
+        # self.style_embedding_layer = style_embedding_layer
         self.scores = tf.keras.layers.Dense(num_tokens)
 
     @staticmethod
@@ -352,6 +356,7 @@ class Decoder(tf.keras.layers.Layer):
         _decoder_outputs = tf.reshape(decoder_outputs, (batch_size*max_timesteps, self.d_emb))  # (batch_size*max_timesteps, d_emb)
 
         # scores.shape == (batch_size, max_timesteps,
+        # _scores = self.style_embedding_layer(_decoder_outputs, mode='decode')
         _scores = self.scores(_decoder_outputs)  # (batch_size*max_timesteps, num_tokens)
         scores = tf.reshape(_scores, (batch_size, max_timesteps, self.num_tokens))
 
@@ -372,15 +377,50 @@ class EmbeddingLayer(tf.keras.layers.Layer):
     def call(self, x):
         return self.embeddings(x)
 
+class StyleEmbeddingLayer(tf.keras.layers.Layer):
+
+    class EncodeStyleLayer(tf.keras.layers.Layer):
+        def __init__(self, d_style_emb):
+            super().__init__()
+            self.encode_style = tf.keras.layers.Dense(d_style_emb)
+
+        def call(self, x):
+            return self.encode_style(x)
+
+    class DecodeStyleLayer(tf.keras.layers.Layer):
+        def __init__(self, encode_style_layer):
+            super().__init__()
+            self.encode_style_layer = encode_style_layer
+
+        def call(self, x):
+            weights = self.encode_style_layer.get_weights()[0]
+            bias = self.encode_style_layer.get_weights()[1]
+            weights_t = tf.transpose(weights)
+            output = tf.matmul(x - bias, weights_t)
+            return output
+
+    def __init__(self, d_style_emb):
+        super().__init__()
+        self.encode_style_layer = self.EncodeStyleLayer(d_style_emb)
+        self.decode_style_layer = self.DecodeStyleLayer(self.encode_style_layer)
+
+    def call(self, input, mode):
+        assert mode in ['encode', 'decode']
+        if mode == 'encode':
+            return self.encode_style_layer(input)
+        elif mode == 'decode':
+            return self.decode_style_layer(input)
+
 class Generator(tf.keras.layers.Layer):
 
     def __init__(self, d_emb, d_content, token_dropout_rate, style_dist_type,
-                 style_dist_params, embedding_layer, max_timesteps):
+                 style_dist_params, embedding_layer, max_timesteps, style_embedding_layer):
         super().__init__()
 
         self.num_tokens = len(embedding_layer.token_idx['token2idx'])
         self.d_content = d_content
         self.style_dist = self.init_style_dist(style_dist_type, **style_dist_params)
+        self.style_embedding_layer = style_embedding_layer
         self.decoder = Decoder(d_emb, self.num_tokens)
         self.embedding_layer = embedding_layer
         self.max_timesteps = max_timesteps
@@ -407,10 +447,12 @@ class Generator(tf.keras.layers.Layer):
         if style is None:
             style = self.sample_style_prior(batch_size)
 
+        style_emb = self.style_embedding_layer(style, mode='encode')  # (batch_size, d_style_emb)
+
         # last_word.shape == (batch_size, 1)
         last_word = tf.broadcast_to(self.embedding_layer.token_idx['token2idx'][START_TOKEN], (batch_size, 1))
         output = [last_word]
-        hidden_state = self.decoder.get_lstm_initial_state(content, style)
+        hidden_state = self.decoder.get_lstm_initial_state(content, style_emb)
 
         for i in range(self.max_timesteps-1):
             last_word_emb = self.embedding_layer(last_word)  # (batch_size, 1, d_emb)
@@ -437,11 +479,13 @@ class Generator(tf.keras.layers.Layer):
         if style is None:
             style = self.sample_style_prior(batch_size)  # (batch_size, d_style)
 
+        style_emb = self.style_embedding_layer(style, mode='encode')  # (batch_size, d_style_emb)
+
         # last_word.shape == (batch_size, 1)
         last_word = tf.broadcast_to(self.embedding_layer.token_idx['token2idx'][START_TOKEN], (batch_size, 1))
         last_word_emb = self.embedding_layer(last_word)  # (batch_size, 1, d_emb)
         output = [last_word_emb]
-        hidden_state = self.decoder.get_lstm_initial_state(content, style)
+        hidden_state = self.decoder.get_lstm_initial_state(content, style_emb)
 
         for i in range(self.max_timesteps-1):
             # scores.shape == (batch_size, 1, num_tokens)
